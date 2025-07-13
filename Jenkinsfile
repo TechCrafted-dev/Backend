@@ -8,17 +8,6 @@ pipeline {
     }
 
     stages {
-        stage('Check config') {
-            steps {
-                sh '''
-                    if [ ! -f config.py ]; then
-                        echo "❌ ERROR: config.py no existe en el workspace"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-
         stage('Build image') {
             steps {
                 sh 'docker build --pull -t ${TAG} .'
