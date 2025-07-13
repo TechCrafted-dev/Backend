@@ -20,7 +20,7 @@ pipeline {
                   docker stop ${APP_NAME} || true
                   docker rm   ${APP_NAME} || true
                   docker run -d -p ${PORT}:3000 \
-                  -v ${FOLDER}:/app/config.py \
+                  -v ${FOLDER}:/app/data \
                   --name ${APP_NAME} \
                   ${TAG} \
                 '''
