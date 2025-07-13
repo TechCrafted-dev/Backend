@@ -1,9 +1,14 @@
 #!/bin/sh
 
-if [ ! -f /app/config.py ]; then
-  echo "❌ Error: config.py no encontrado. Debes montar un archivo de configuración basado en config_template.py."
-  echo "Usa el volumen: ./config.py:/app/config.py"
+CONFIG_FILE=/app/data/config.py
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "❌ Error: config.py no encontrado en /app/data"
+  echo "Crea uno basado en config_template.py"
   exit 1
 fi
+
+# Enlace simbólico para que el import funcione como `from config import ...`
+ln -sf /app/data/config.py /app/config.py
 
 exec "$@"
