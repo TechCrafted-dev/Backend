@@ -162,3 +162,14 @@ def update_post(post):
 
         else:
             log_database.warning(f"Post con ID {post.id} no encontrado para actualizar.")
+
+
+def get_posts():
+    with SessionLocal() as session:
+        posts = session.query(Posts).all()
+        if posts:
+            log_database.info(f"{len(posts)} posts recuperados exitosamente.")
+            return posts
+        else:
+            log_database.warning("No se encontraron posts.")
+            return []

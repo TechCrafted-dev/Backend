@@ -1,4 +1,3 @@
-import json
 import re
 import github
 import techAI
@@ -108,7 +107,29 @@ async def get_post(repo_id: int):
         }
 
     else:
+        log_main.warning(f"Post para repositorio {repo_id} no encontrado.")
         return {"error": "Post not found"}
+
+
+@app.get("/posts")
+async def get_posts():
+    log_main.info("Obteniendo todos los posts...")
+
+    posts = database.get_posts()
+    if posts:
+        return [
+            {
+                "id": post.id,
+                "title": post.title,
+                "description": post.description,
+                "created_at": post.created_at,
+                "updated_at": post.updated_at,
+                "article": post.article
+            } for post in posts
+        ]
+
+    else:
+        return {"error": "No posts found"}
 
 
 @app.post("/repos/update")
