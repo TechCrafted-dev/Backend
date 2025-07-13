@@ -1,10 +1,10 @@
 pipeline {
     agent any
     environment {
-        APP_NAME = 'api-techcrafted'
+        APP_NAME = 'techcrafted-api'
         PORT     = '3000'
         TAG      = "${APP_NAME}:latest"
-        CONFIG_FILE   = "/mnt/Data/Contenedores/Backend_TechCrafted.dev"
+        CONFIG_FILE   = "/mnt/Data/Contenedores/Backend_TechCrafted.dev/config.py"
     }
 
     stages {
