@@ -1,0 +1,6 @@
+uvicorn
+python-dateutil
+fastapi
+requests
+openai
+SQLAlchemy
