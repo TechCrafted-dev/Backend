@@ -31,12 +31,6 @@ async def generate_post_logic(data: dict) -> database.Posts:
     markdown_pattern = re.compile(r'```markdown\n(.*?)```', re.DOTALL)
     post = ''.join(markdown_pattern.findall(response)) or response
 
-    file_name = f"post_{data['id']}.md"
-    with open(f"posts/{file_name}", "w", encoding="utf-8") as f:
-        f.write(post)
-
-    log_main.info(f"Contenido guardado en archivo {file_name}")
-
     new_post = database.Posts(
         id=data["id"],
         title=data["name"],
