@@ -43,7 +43,8 @@ async def generate_post_logic(data: dict) -> database.Posts:
     return new_post
 
 
-@app.post("/posts", response_class=JSONResponse)
+@app.post("/posts", response_class=JSONResponse,summary="Generate and save a new post",
+         description="Generates a new post based on the provided repository data and saves it to the database if it does not already exist.")
 async def gen_post(data: dict):
     new_post = await generate_post_logic(data)
 
@@ -53,7 +54,8 @@ async def gen_post(data: dict):
     return new_post
 
 
-@app.put("/posts/{repo_id}")
+@app.put("/posts/{repo_id}", summary="Update post",
+         description="Updates an existing post for a specific repository by its ID if it exists.")
 async def update_post(repo_id: int):
     log_main.info(f"Actualizando post para repositorio {repo_id}...")
 
@@ -85,7 +87,8 @@ async def update_post(repo_id: int):
         return {"error": "Post not found"}
 
 
-@app.get("/posts/{repo_id}")
+@app.get("/posts/{repo_id}", summary="Get post by repository ID",
+         description="Returns a specific post by its repository ID if it exists.")
 async def get_post(repo_id: int):
     log_main.info(f"Obteniendo post para repositorio {repo_id}...")
 
@@ -105,7 +108,8 @@ async def get_post(repo_id: int):
         return {"error": "Post not found"}
 
 
-@app.get("/posts")
+@app.get("/posts", summary="Get all posts",
+         description="Returns a list of all posts stored in the database.")
 async def get_posts():
     log_main.info("Obteniendo todos los posts...")
 
@@ -126,7 +130,8 @@ async def get_posts():
         return {"error": "No posts found"}
 
 
-@app.post("/repos/update")
+@app.post("/repos/update", summary="Update repositories",
+          description="Fetches repositories from GitHub and updates them in the database if they exist.")
 async def update_repos():
     repos = github.get_repos_data()
 
@@ -162,7 +167,8 @@ async def update_repos():
     return {"message": "Repositories updated successfully"}
 
 
-@app.post("/repos")
+@app.post("/repos", summary="Set repositories",
+          description="Fetches repositories from GitHub and saves them to the database if they do not exist.")
 async def set_repos():
     repos = github.get_repos_data()
 
@@ -190,7 +196,8 @@ async def set_repos():
             database.set_repo(new_repo)
 
 
-@app.get("/repos/{repo_id}")
+@app.get("/repos/{repo_id}", summary="Get repository by ID",
+         description="Returns a specific repository by its ID if it exists.")
 async def get_repo(repo_id: int):
     repo = database.get_repo(repo_id)
     if repo:
@@ -200,13 +207,30 @@ async def get_repo(repo_id: int):
         return {"error": "Repository not found"}
 
 
-@app.get("/repos")
+@app.get("/repos", summary="Get all repositories",
+         description="Returns a list of all repositories stored in the database.")
 async def get_repos():
     repos = database.get_repos()
+
     return repos
 
 
-@app.get("/health", response_class=PlainTextResponse)
+@app.get("/github-data", summary="Get GitHub data",
+         description="Fetches and returns the latest GitHub repository data.")
+async def get_github_data():
+    log_main.info("Fetching GitHub repository data...")
+    repos = github.get_repos_data()
+
+    if not repos:
+        log_main.warning("No repositories found.")
+        return {"error": "No repositories found"}
+
+    return repos
+
+
+@app.get("/health", response_class=PlainTextResponse,
+         summary="Health check endpoint",
+         description="Returns 'ok' if the service is running.")
 async def health():
     return "ok"
 
