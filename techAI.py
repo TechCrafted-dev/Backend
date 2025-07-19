@@ -1,6 +1,5 @@
 import re
 import json
-
 import httpx
 
 from enum   import Enum, auto
@@ -12,6 +11,7 @@ from config import log_techAI, OPENAI_API_KEY
 aclient = AsyncOpenAI(api_key=OPENAI_API_KEY)
 MODEL = "gpt-4o"
 TEMP  = 0.7
+
 
 # ---------- HELPERS ------------
 async def _chat(system: str, user: str) -> str:
@@ -108,7 +108,6 @@ Con base en los siguientes puntos clave, diseña una estructura Markdown:
 - sections: array[str] (subtítulos H2 en orden lógico, 3-6 elementos)
 """
     try:
-        # function-calling opcional; aquí devolvemos texto JSON
         response = await _chat(sys, user)
         json_pattern = re.compile(r'```json\n(.*?)```', re.DOTALL)
         outline = ''.join(json_pattern.findall(response)) or response
