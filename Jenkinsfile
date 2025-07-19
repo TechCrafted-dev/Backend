@@ -5,24 +5,28 @@ pipeline {
       Variables de entorno
     ────────────────────────────*/
     environment {
-        // --- Docker ---
-        REPO_NAME   = 'techcrafted-api'
-        TAG         = "${REPO_NAME}:${env.BRANCH_NAME}"
-        PROD_NAME   = 'techcrafted-api'  // Contenedor producción
-        PROD_PORT   = '3000'             // Puerto producción
-        FOLDER   = "/mnt/Data/Contenedores/Backend_TechCrafted.dev/"
+        REPO_NAME  = 'techcrafted-api'
+
+        // --- Image ---
+        SHORT_SHA  = "${env.GIT_COMMIT.take(8)}"
+        TAG_UNIQ   = "${REPO_NAME}:${SHORT_SHA}"
+        TAG_LATEST = "${REPO_NAME}:latest"
+
+        // --- Container
+        PROD_NAME  = 'techcrafted-api'
+        PROD_PORT  = '3000'
+        FOLDER     = '/mnt/Data/Contenedores/Backend_TechCrafted.dev/'
 
         // --- Telegram ---
-        TG_TOKEN    = credentials('TELEGRAM_TOKEN')
-        TG_CHAT     = credentials('TELEGRAM_CHAT_ID')
+        TG_TOKEN   = credentials('TELEGRAM_TOKEN')
+        TG_CHAT    = credentials('TELEGRAM_CHAT_ID')
     }
 
     /*────────────────────────────
         Etapas del pipeline
     ────────────────────────────*/
-
     stages {
-        /* Notificación de inicio */
+        /* ---------- NOTIFICACIÓN ---------- */
         stage('Notify start') {
             steps {
                 script {
@@ -49,19 +53,56 @@ pipeline {
             }
         }
 
-        /* Desplegar en producción*/
-        stage('Deploy to PROD') {
-            when { expression { env.BRANCH_NAME == 'main' } }
+        /* ---------- COMPILAR IMAGEN ---------- */
+        stage('Build image') {
             steps {
                 sh """
-                    docker stop ${PROD_NAME} || true
-                    docker rm   ${PROD_NAME} || true
-                    docker run -d --name ${PROD_NAME} \
-                                 --restart unless-stopped \
-                                 -v ${FOLDER}:/app/data \
-                                 -p ${PROD_PORT}:3000 \
-                                 ${TAG}
+                docker build --pull --no-cache \
+                    --label project=techcrafted-api \
+                    --build-arg VCS_REF=${GIT_COMMIT} \
+                    -t ${TAG_UNIQ} -t ${TAG_LATEST} .
                 """
+            }
+        }
+
+        /* ---------- DEPLOY ---------- */
+        stage('Deploy to PROD') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                docker stop ${PROD_NAME} || true
+                docker rm   ${PROD_NAME} || true
+
+                docker run -d --name ${PROD_NAME} \
+                    --restart unless-stopped \
+                    -v ${FOLDER}:/app/data \
+                    -p ${PROD_PORT}:3000 \
+                    ${TAG_LATEST}
+                '''
+            }
+        }
+
+        /* ---------- LIMPIEZA ---------- */
+        stage('House-keeping images') {
+            when { branch 'main' }
+            steps {
+                // 1) Mantener como máximo las 5 imágenes más recientes del proyecto
+                sh '''
+                keep=5
+                ids=$(docker images ${REPO_NAME} --format "{{.CreatedAt}} {{.ID}}" | \
+                    sort -r | tail -n +$((keep+1)) | awk '{print $2}')
+
+                if [ -n "$ids" ]; then
+                    docker rmi $ids || true
+                fi
+                '''
+
+                // 2)  Quitar capas huérfanas (>30 días) de ESTE proyecto
+                sh '''
+                docker image prune -a -f \
+                    --filter "label=project=techcrafted-api" \
+                    --filter "until=720h"
+                '''
             }
         }
     }
