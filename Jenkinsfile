@@ -12,37 +12,44 @@ pipeline {
         PROD_PORT   = '3000'             // Puerto producción
         FOLDER   = "/mnt/Data/Contenedores/Backend_TechCrafted.dev/"
 
-        // --- Telegram (credenciales en Jenkins) ---
+        // --- Telegram ---
         TG_TOKEN    = credentials('TELEGRAM_TOKEN')
         TG_CHAT     = credentials('TELEGRAM_CHAT_ID')
     }
 
-    stages {
+    /*────────────────────────────
+        Etapas del pipeline
+    ────────────────────────────*/
 
-        /* Notificación de arranque */
+    stages {
+        /* Notificación de inicio */
         stage('Notify start') {
             steps {
-                sh """
-                    curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-                         -d chat_id=${TG_CHAT} \
-                         -d text="🚀 *${env.BRANCH_NAME}*: build iniciado (commit ${GIT_COMMIT})" \
-                         -d parse_mode=Markdown
-                """
+                script {
+                    // Hash corto (8 caracteres) — evita mensajes demasiado largos
+                    def shortCommit = env.GIT_COMMIT.take(8)
+
+                    // Mensaje HTML multilínea
+                    def msg = """
+                        <b>📦 ${env.REPO_NAME}</b>
+                        <b>Branch:</b> ${env.BRANCH_NAME}
+                        <b>Commit:</b> <code>${shortCommit}</code>
+
+                        🏗️ Build iniciado…
+                    """.stripIndent().trim()
+
+                    // Llamada al bot
+                    sh """
+                        curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+                             --data-urlencode "chat_id=${TG_CHAT}" \
+                             --data-urlencode "text=${msg}" \
+                             -d parse_mode=HTML
+                    """
+                }
             }
         }
 
-        /* Compilar imagen Docker */
-        stage('Build image') {
-            steps {
-                sh """
-                    docker build --pull \
-                                 --build-arg VCS_REF=${GIT_COMMIT} \
-                                 -t ${TAG} .
-                """
-            }
-        }
-
-        /* Desplegar en producción (solo main) */
+        /* Desplegar en producción*/
         stage('Deploy to PROD') {
             when { expression { env.BRANCH_NAME == 'main' } }
             steps {
@@ -57,28 +64,6 @@ pipeline {
                 """
             }
         }
-
-        /* sandbox para ramas que no sean main */
-        /*
-        stage('Deploy to Sandbox') {
-            when { expression { env.BRANCH_NAME != 'main' } }
-            steps {
-                script {
-                    // El nombre y puerto del sandbox dependen de la rama
-                    def SB_NAME = "blog-${env.BRANCH_NAME}"
-                    def SB_PORT = env.BRANCH_NAME == 'dev' ? '8080' : '8081'
-                    sh """
-                        docker stop ${SB_NAME} || true
-                        docker rm   ${SB_NAME} || true
-                        docker run -d --name ${SB_NAME} \
-                                     --restart unless-stopped \
-                                     -p ${SB_PORT}:3000 ${TAG}
-                    """
-                }
-            }
-        }
-        */
-
     }
 
     /*────────────────────────────
@@ -86,20 +71,35 @@ pipeline {
     ────────────────────────────*/
     post {
         success {
-            sh """
-                curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-                     -d chat_id=${TG_CHAT} \
-                     -d text="✅ *${env.BRANCH_NAME}* desplegado con éxito${env.BRANCH_NAME == 'main' ? ' en producción' : ''}" \
-                     -d parse_mode=Markdown
-            """
+            script {
+                def msg = """
+                    <b>✅ Despliegue completado</b>
+                    Todo salió bien.
+                """.stripIndent().trim()
+
+                sh """
+                    curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \\
+                         --data-urlencode "chat_id=${TG_CHAT}" \\
+                         --data-urlencode "text=${msg}" \\
+                         -d parse_mode=HTML
+                """
+            }
         }
+
         failure {
-            sh """
-                curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-                     -d chat_id=${TG_CHAT} \
-                     -d text="❌ Falló el build de *${env.BRANCH_NAME}*. Revisa Jenkins." \
-                     -d parse_mode=Markdown
-            """
+            script {
+                def msg = """
+                    <b>❌ Build fallido</b>
+                    Revisa Jenkins para más detalles.
+                """.stripIndent().trim()
+
+                sh """
+                    curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \\
+                         --data-urlencode "chat_id=${TG_CHAT}" \\
+                         --data-urlencode "text=${msg}" \\
+                         -d parse_mode=HTML
+                """
+            }
         }
     }
 }
