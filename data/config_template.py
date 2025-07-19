@@ -76,7 +76,3 @@ GITHUB_TOKEN = ""
 
 # Configuración de OpenAI
 OPENAI_API_KEY = ""
-
-# Prompt del sistema para OpenAI
-SYSTEM_PROMPT = """
-"""
