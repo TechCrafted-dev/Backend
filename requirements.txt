@@ -1,6 +1,7 @@
-uvicorn
-python-dateutil
-fastapi
-requests
+httpx
 openai
+fastapi
+uvicorn
+requests
 SQLAlchemy
+python-dateutil
