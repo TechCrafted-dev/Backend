@@ -1,5 +1,5 @@
-import json
 import re
+import json
 
 import httpx
 
@@ -10,7 +10,7 @@ from config import log_techAI, OPENAI_API_KEY
 
 # ---------- OPENAI -------------
 aclient = AsyncOpenAI(api_key=OPENAI_API_KEY)
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4o"
 TEMP  = 0.7
 
 # ---------- HELPERS ------------
@@ -153,7 +153,7 @@ async def tool_write_post(outline_json: str, repo_meta: dict, readme: str) -> st
 
 # - Limpia el Markdown final
 async def tool_markdown_polish(draft_md: str) -> str:
-    log_techAI.info("Limpiando el Markdown final...")
+    log_techAI.info("Depurando el Markdown final...")
     sys = (
         "Eres un corrector de estilo Markdown. "
         "Corrige formatos (encabezados, listas, code-blocks) sin cambiar el contenido."
@@ -170,12 +170,14 @@ async def tool_markdown_polish(draft_md: str) -> str:
 
 # ---------- PIPELINES ----------
 class Pipeline(Enum):
-    TEST = auto()  # Para pruebas unitarias
+    TEST = auto()  # Para pruebas
+    POST = auto()  # Para generar posts
+
 
 async def run_pipeline(data: dict, mode: Pipeline) -> str:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
     try:
-        if mode is Pipeline.TEST:
+        if mode is Pipeline.POST:
             readme = await tool_fetch_readme(data)
             analysis = await tool_analyze_repo(data, readme)
             outline = await tool_generate_outline(analysis)
@@ -189,7 +191,7 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str:
 
 
 # ---------- GENERATE POST -------
-async def gen_post(data: dict, mode: Pipeline = Pipeline.TEST) -> str:
+async def gen_post(data: dict, mode: Pipeline) -> str:
     log_techAI.info("Generando post...")
 
     try:

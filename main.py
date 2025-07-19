@@ -27,7 +27,8 @@ app.add_middleware(
 async def generate_post_logic(data: dict) -> database.Posts:
     log_main.info(f"Generando post para repositorio {data['name']}...")
 
-    response = await techAI.gen_post(data)
+    mode = techAI.Pipeline.POST
+    response = await techAI.gen_post(data, mode=mode)
     markdown_pattern = re.compile(r'```markdown\n(.*?)```', re.DOTALL)
     post = ''.join(markdown_pattern.findall(response)) or response
 
