@@ -1,9 +1,9 @@
 ## TechCrafted API
 
-[![Python](https://img.shields.io/badge/-Python-3776AB?style=flat&logo=python&logoColor=fff)](#tecnologías)
-[![SQLite](https://img.shields.io/badge/-SQLite-003B57?style=flat&logo=sqlite&logoColor=white)](#tecnologías)
-[![GitHub](https://img.shields.io/badge/-GitHub-181717?style=flat&logo=github&logoColor=white)](#tecnologías)
-[![OpenAI](https://img.shields.io/badge/-OpenAI-412991?style=flat&logo=openai&logoColor=white)](#tecnologías)
+![Python](https://img.shields.io/badge/-Python-3776AB?style=flat&logo=python&logoColor=fff)
+![SQLite](https://img.shields.io/badge/-SQLite-003B57?style=flat&logo=sqlite&logoColor=white)
+![GitHub](https://img.shields.io/badge/-GitHub-181717?style=flat&logo=github&logoColor=white)
+![OpenAI](https://img.shields.io/badge/-OpenAI-412991?style=flat&logo=openai&logoColor=white)
 
 ¡Bienvenido a **TechCrafted API**, la plataforma que automatiza la recopilación de métricas de GitHub y la generación de contenido técnico listo para publicar!  
 El servicio expone una API REST construida con FastAPI y respaldada por SQLAlchemy, de modo que puedas consultar, almacenar y enriquecer datos de repositorios, así como generar artículos con tecnología de IA de forma sencilla y escalable.

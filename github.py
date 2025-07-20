@@ -1,4 +1,3 @@
-import json
 import requests
 
 from config import log_github, GITHUB_USERNAME, GITHUB_TOKEN
@@ -25,6 +24,17 @@ def get_user_info():
         log_github.error(f"Error al obtener la información del usuario. Código: {response.status_code}")
         return {}
 
+def get_user_orgs():
+    url = f"https://api.github.com/users/{GITHUB_USERNAME}/orgs"
+    response = requests.get(url, headers=HEADERS)
+
+    if response.status_code == 200:
+        log_github.info("Información de organizaciones obtenida correctamente.")
+        return response.json()
+
+    else:
+        log_github.error(f"Error al obtener la información de organizaciones. Código: {response.status_code}")
+        return []
 
 # Obtener la lista de repositorios del usuario
 def get_repositories():

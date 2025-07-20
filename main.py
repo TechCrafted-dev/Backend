@@ -5,10 +5,10 @@ import uvicorn
 import database
 
 from dateutil.parser import isoparse
-from config import LOGGING_CONFIG, log_main
+from config          import LOGGING_CONFIG, log_main
 
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi                 import FastAPI
+from fastapi.responses       import PlainTextResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -339,6 +339,42 @@ async def get_github_data():
 
     except Exception as e:
         log_main.error(f"Error fetching GitHub data: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/github-user/orgs", summary="Get GitHub user organizations",
+         description="Fetches and returns the GitHub user organizations.")
+async def get_github_user_orgs():
+    try:
+        log_main.info("Fetching GitHub user organizations...")
+        orgs = github.get_user_orgs()
+
+        if not orgs:
+            log_main.warning("GitHub user organizations not found.")
+            return {"error": "GitHub user organizations not found"}
+
+        return orgs
+
+    except Exception as e:
+        log_main.error(f"Error fetching GitHub user organizations: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/github-user", summary="Get GitHub user data",
+         description="Fetches and returns the GitHub user data.")
+async def get_github_user():
+    try:
+        log_main.info("Fetching GitHub user data...")
+        user = github.get_user_info()
+
+        if not user:
+            log_main.warning("GitHub user not found.")
+            return {"error": "GitHub user not found"}
+
+        return user
+
+    except Exception as e:
+        log_main.error(f"Error fetching GitHub user data: {e}")
         return {"error": str(e)}
 
 
