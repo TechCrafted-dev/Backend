@@ -76,11 +76,49 @@ async def gen_post(repo_id: int):
         if database.get_post(repo_id) is None:
             database.save_post(new_post)
 
-        return {"message": "Post updated successfully"}
+        return {"message": "Post create successfully"}
 
     except Exception as e:
         log_main.error(f"Error generating post: {e}")
         return {"error": str(e)}
+
+
+@app.put("/posts/update_all", summary="Update all post",
+         description="Updates all existing posts in the database based on the latest repository data.")
+async def update_all_posts():
+    log_main.info(f"Actualizando todos los posts...")
+
+    repos = database.get_repos()
+    if not repos:
+        log_main.warning("No hay repositorios para actualizar posts.")
+        return {"error": "No repositories found"}
+
+
+    count = 1
+    for repo in repos:
+        log_main.info(f"{count}/{len(repos)} Repositorio {repo.id} - {repo.name}")
+        repo_json = {
+            "id": repo.id,
+            "name": repo.name,
+            "description": repo.description,
+            "url": repo.url,
+            "language": repo.language,
+            "stars": repo.stars,
+            "forks": repo.forks,
+            "watchers": repo.watchers,
+            "views": repo.views,
+            "unique_views": repo.unique_views,
+            "clones": repo.clones,
+            "unique_clones": repo.unique_clones,
+            "created_at": repo.created_at.isoformat(),
+            "updated_at": repo.updated_at.isoformat(),
+        }
+
+        post = await generate_post_logic(repo_json)
+        database.update_post(post)
+        count += 1
+
+    return {"message": "All posts updated successfully"}
 
 
 @app.put("/posts/{repo_id}", summary="Update post",
@@ -118,48 +156,6 @@ async def update_post(repo_id: int):
 
     except Exception as e:
         log_main.error(f"Error updating post for repository {repo_id}: {e}")
-        return {"error": str(e)}
-
-
-@app.put("/posts/update_all", summary="Update all post",
-         description="Updates all existing posts in the database based on the latest repository data.")
-async def update_all_posts():
-    try:
-        repos = database.get_repos()
-        if not repos:
-            log_main.warning("No hay repositorios para actualizar posts.")
-            return {"error": "No repositories found"}
-
-        log_main.info(f"Actualizando {len(repos)} posts...")
-
-        count = 1
-        for repo in repos:
-            log_main.info(f"{count}/{len(repos)} Repositorio {repo.id} - {repo.name}")
-            repo_json = {
-                "id": repo.id,
-                "name": repo.name,
-                "description": repo.description,
-                "url": repo.url,
-                "language": repo.language,
-                "stars": repo.stars,
-                "forks": repo.forks,
-                "watchers": repo.watchers,
-                "views": repo.views,
-                "unique_views": repo.unique_views,
-                "clones": repo.clones,
-                "unique_clones": repo.unique_clones,
-                "created_at": repo.created_at.isoformat(),
-                "updated_at": repo.updated_at.isoformat(),
-            }
-
-            post = await generate_post_logic(repo_json)
-            database.update_post(post)
-            count += 1
-
-        return {"message": "All posts updated successfully"}
-
-    except Exception as e:
-        log_main.error(f"Error updating posts: {e}")
         return {"error": str(e)}
 
 
