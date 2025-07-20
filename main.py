@@ -88,37 +88,42 @@ async def gen_post(repo_id: int):
 async def update_all_posts():
     log_main.info(f"Actualizando todos los posts...")
 
-    repos = database.get_repos()
-    if not repos:
-        log_main.warning("No hay repositorios para actualizar posts.")
-        return {"error": "No repositories found"}
+    try:
+        repos = database.get_repos()
+        if not repos:
+            log_main.warning("No hay repositorios para actualizar posts.")
+            return {"error": "No repositories found"}
 
 
-    count = 1
-    for repo in repos:
-        log_main.info(f"{count}/{len(repos)} Repositorio {repo.id} - {repo.name}")
-        repo_json = {
-            "id": repo.id,
-            "name": repo.name,
-            "description": repo.description,
-            "url": repo.url,
-            "language": repo.language,
-            "stars": repo.stars,
-            "forks": repo.forks,
-            "watchers": repo.watchers,
-            "views": repo.views,
-            "unique_views": repo.unique_views,
-            "clones": repo.clones,
-            "unique_clones": repo.unique_clones,
-            "created_at": repo.created_at.isoformat(),
-            "updated_at": repo.updated_at.isoformat(),
-        }
+        count = 1
+        for repo in repos:
+            log_main.info(f"{count}/{len(repos)} Repositorio {repo.id} - {repo.name}")
+            repo_json = {
+                "id": repo.id,
+                "name": repo.name,
+                "description": repo.description,
+                "url": repo.url,
+                "language": repo.language,
+                "stars": repo.stars,
+                "forks": repo.forks,
+                "watchers": repo.watchers,
+                "views": repo.views,
+                "unique_views": repo.unique_views,
+                "clones": repo.clones,
+                "unique_clones": repo.unique_clones,
+                "created_at": repo.created_at.isoformat(),
+                "updated_at": repo.updated_at.isoformat(),
+            }
 
-        post = await generate_post_logic(repo_json)
-        database.update_post(post)
-        count += 1
+            post = await generate_post_logic(repo_json)
+            database.update_post(post)
+            count += 1
 
-    return {"message": "All posts updated successfully"}
+        return {"message": "All posts updated successfully"}
+
+    except Exception as e:
+        log_main.error(f"Error updating all posts: {e}")
+        return {"error": str(e)}
 
 
 @app.put("/posts/{repo_id}", summary="Update post",
