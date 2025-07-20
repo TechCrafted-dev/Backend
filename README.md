@@ -10,7 +10,7 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 
 ---
 
-### 🏆 Puntos fuertes
+### Puntos fuertes
 
 | Funcionalidad | Descripción |
 | ------------- | ----------- |
@@ -22,7 +22,7 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 
 ---
 
-### 🚀 Casos de uso
+### Casos de uso
 
 1. **Desarrolladores** que deseen integrar métricas de sus repositorios en dashboards personalizados.  
 2. **Equipos de marketing técnico** que necesiten contenido actualizado y basado en datos reales.  
@@ -31,7 +31,7 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 
 ---
 
-### 🏗️ Arquitectura en un vistazo
+### Arquitectura en un vistazo
 
 ```
                    ┌────────┐      ┌───────────┐      ┌──────────┐
@@ -47,7 +47,7 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 
 ---
 
-### 📋 Requisitos
+### Requisitos
 
 - Python ≥ 3.11  
 - `virtualenv`  
@@ -56,7 +56,7 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 
 ---
 
-### ⚙️ Instalación rápida
+### Instalación rápida
 
 ```shell script
 # 1. Clona el repositorio
@@ -79,7 +79,7 @@ $ uvicorn main:app --reload
 ```
 
 
-### 🐳 Despliegue con Docker
+### Despliegue con Docker
 
 ```shell script
 $ docker build -t techcrafted-api:latest .
@@ -93,7 +93,7 @@ $ docker run -d -p 3000:3000 \
 
 ---
 
-### 🧩 Principales endpoints
+### Principales endpoints
 
 | Método | Ruta            | Descripción                              |
 | ------ |-----------------| ---------------------------------------- |
@@ -107,7 +107,7 @@ Descubre el resto en el [SWAGGER](http://localhost:3000/docs) una vez que la API
 
 ---
 
-### 🔄 Flujo de generación de contenido
+### Flujo de generación de contenido
 
 1. Obtén los repositorios de GitHub `POST /repos`.
 2. Se actualiza la base de datos con los datos más recientes.
@@ -119,7 +119,7 @@ Descubre el resto en el [SWAGGER](http://localhost:3000/docs) una vez que la API
 
 ---
 
-### 📅 Roadmap
+### Roadmap
 
 - [ ] Compatibilidad con **GitLab** y **Bitbucket**.  
 - [ ] Sistema de cache con Redis.  
@@ -128,7 +128,7 @@ Descubre el resto en el [SWAGGER](http://localhost:3000/docs) una vez que la API
 
 ---
 
-### 🤝 Cómo contribuir
+### Cómo contribuir
 
 1. Haz un fork y crea tu rama: `git checkout -b feature/mi-mejora`  
 2. Sigue la guía de estilo **PEP 8** y añade pruebas si procede.  
@@ -137,7 +137,7 @@ Descubre el resto en el [SWAGGER](http://localhost:3000/docs) una vez que la API
 
 ---
 
-### 📝 Licencia
+### Licencia
 
 Distribuido bajo la licencia **GPL 3.0**. Consulta el archivo `LICENSE` para más información.
 
