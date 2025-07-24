@@ -56,7 +56,9 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
 
 
 # Crear la base de datos solo si no existe
-if not os.path.exists("./repos.db"):
+# Obtener la ruta real del archivo de base de datos a partir de DATABASE_URL
+db_path = DATABASE_URL.replace("sqlite:///", "")
+if not os.path.exists(db_path):
     Base.metadata.create_all(bind=engine)
 
 inspector = inspect(engine)
