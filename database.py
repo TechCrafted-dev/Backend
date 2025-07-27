@@ -36,6 +36,14 @@ class Posts(Base):
     updated_at = Column(DateTime, nullable=False)                # Fecha de última actualización del post
     article = Column(String, nullable=False)                     # Contenido del post
 
+class News(Base):
+    __tablename__ = 'news'
+    id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la noticia
+    title = Column(String, nullable=False, unique=True)          # Título de la noticia
+    article = Column(String, nullable=False)                     # Contenido de la noticia
+    created_at = Column(DateTime, nullable=False)                # Fecha de la noticia
+    source = Column(String, nullable=False)                      # Fuente de la noticia
+
 
 # Configuración de la base de datos SQLite
 DATABASE_URL = "sqlite:///data/repositories.db"
@@ -175,3 +183,11 @@ def get_posts():
         else:
             log_database.warning("No se encontraron posts.")
             return []
+
+
+""" NOTICIAS """
+def save_news(new_news: News):
+    with SessionLocal() as session:
+        session.add(new_news)
+        session.commit()
+        log_database.info(f"Noticia {new_news.title} guardada exitosamente.")

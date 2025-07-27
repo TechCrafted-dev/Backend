@@ -1,6 +1,6 @@
 import re
-import github
 import techAI
+import github
 import uvicorn
 import database
 
@@ -24,12 +24,24 @@ app.add_middleware(
 )
 
 
+@app.get("/get_news", summary="Get latest news",
+         description="Fetches the latest news from the techAI service.")
+async def get_news():
+    log_main.info("Obteniendo últimas noticias...")
+
+    news = await techAI.get_news(mode=techAI.Pipeline.NEWS)
+    if not news:
+        log_main.warning("No se encontraron noticias.")
+        return {"error": "No news found"}
+
+    return {"news": news}
+
+
 async def generate_post_logic(data: dict) -> database.Posts:
     try:
         log_main.info(f"Generando post para repositorio {data['name']}...")
 
-        mode = techAI.Pipeline.POST
-        response = await techAI.gen_post(data, mode=mode)
+        response = await techAI.gen_post(data, mode=techAI.Pipeline.POST)
         markdown_pattern = re.compile(r'```markdown\n(.*?)```', re.DOTALL)
         post = ''.join(markdown_pattern.findall(response)) or response
 
