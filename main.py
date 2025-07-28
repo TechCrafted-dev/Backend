@@ -25,8 +25,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         search_news,
         'cron',
-        hour=22,
-        minute=12,
+        hour=6,
+        minute=0,
         id='search_news_job',
         replace_existing=True,
         misfire_grace_time=300)
@@ -36,7 +36,6 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         scheduler.shutdown(wait=False)
-
 
 app = FastAPI(lifespan=lifespan)
 
