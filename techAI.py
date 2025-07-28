@@ -297,6 +297,7 @@ async def tool_get_news(sources: list) -> dict:
         "Solo considera noticias publicadas en los últimos 7 días.\n\n"
     
         "- Analiza únicamente los titulares, no profundices en el contenido completo.\n"
+        "- Traduce los títulos al español si están en otro idioma.\n"
         "- Descarta artículos que sean notas de prensa, ofertas de empleo, "
         "eventos o contenido puramente comercial.\n"
         "- Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
@@ -345,16 +346,15 @@ async def tool_cleanup_news(news_sources: dict) -> list:
     log_techAI.info("Limpiando y clasificando noticias...")
 
     model = [{
-        "title": "Titulo de la noticia",
+        "title": "Titulo de la noticia en español",
         "date": "YYYY-MM-DD",
-        "lenguaje": "Lenguaje de programación relacionado (Python, Java, etc.)",
+        "language": "Lenguaje de programación relacionado (Python, Java, etc.)",
         "source": "URL fuente de la noticia",
         "url": "URL de la noticia"
     }]
 
     sys = (
         'Eres un asistente que organiza noticias tecnológicas.'
-        'Organiza las siguientes noticias por fecha de forma ascendente.'
         'Devuelve un JSON con la siguiente estructura:'
         f'{json.dumps(model, ensure_ascii=False, indent=2)}\n'
     )
@@ -384,6 +384,8 @@ async def tool_cleanup_news(news_sources: dict) -> list:
         user = ("Analiza atentamente las noticias proporcionadas."
                 "Deben estar relacionadas con programación: Python, Java, JavaScript, etc."
                 "Descarta aquellas que no aporten valor, que sean irrelevantes o que estén duplicadas."
+                "Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
+                "frameworks o herramientas relevantes para desarrolladores"
                 f"\n{json.dumps(news, ensure_ascii=False, indent=2)}")
 
         try:
@@ -410,7 +412,8 @@ async def tool_redactor(news: list) -> list:
     sys = (
         "Eres un redactor profesional que escribe resúmenes de noticias tecnológicas."
         "Utiliza un tono directo y profesional, pero cercano."
-        "Cada noticia debe tener un resumen breve y conciso."
+        "No incluyas ni fechas ni urls en el resumen."
+        "Al final del resumen, incluye una línea horizontal `---` e invita a visitar la pagina de la noticia."
         "Devuelve el resultado en formato Markdown."
         "Usa la fuente y la URL de la noticia para proporcionar contexto."
         "Si la URL de la noticia no es válida, descártala respondiendo únicamente None."
@@ -422,7 +425,7 @@ async def tool_redactor(news: list) -> list:
         user = (
             f"### {news_item['title']}\n"
             f"- **Fecha:** {news_item['date']}\n"
-            f"- **Lenguaje:** {news_item['lenguaje']}\n"
+            f"- **Lenguaje:** {news_item['language']}\n"
             f"- **Fuente:** [{news_item['source']}]"
             f"- **Url:** ({news_item['url']})\n"
         )

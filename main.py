@@ -34,6 +34,17 @@ async def get_news():
         log_main.warning("No se encontraron noticias.")
         return {"error": "No news found"}
 
+    save_news = database.News(
+        title=news["title"],
+        summary=news["summary"],
+        created_at=news["date"],
+        language=news["language"],
+        source=news["source"],
+        url=isoparse(news["url"]),
+    )
+
+    database.save_news(save_news)
+
     return {"news": news}
 
 

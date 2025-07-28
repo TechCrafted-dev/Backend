@@ -40,9 +40,11 @@ class News(Base):
     __tablename__ = 'news'
     id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la noticia
     title = Column(String, nullable=False, unique=True)          # Título de la noticia
-    article = Column(String, nullable=False)                     # Contenido de la noticia
+    summary = Column(String, nullable=False)                     # Contenido de la noticia
     created_at = Column(DateTime, nullable=False)                # Fecha de la noticia
+    language = Column(String, nullable=False)                    # Lenguaje de programación
     source = Column(String, nullable=False)                      # Fuente de la noticia
+    url = Column(String, nullable=False)                         # URL de la noticia
 
 
 # Configuración de la base de datos SQLite
@@ -81,7 +83,6 @@ if not inspector.has_table("posts"):
 
 
 """ REPOSITORIOS """
-
 def set_repo(new_repo: Repos):
     with SessionLocal() as session:
         session.add(new_repo)
@@ -139,7 +140,6 @@ def update_repo(updated_repo):
 
 
 """ POSTS"""
-
 def save_post(new_post: Posts):
     with SessionLocal() as session:
         session.add(new_post)
