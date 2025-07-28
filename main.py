@@ -24,9 +24,9 @@ app.add_middleware(
 )
 
 
-@app.get("/get_news", summary="Get latest news",
+@app.get("/search_news", summary="Get latest news",
          description="Fetches the latest news from the techAI service.")
-async def get_news():
+async def search_news():
     log_main.info("Obteniendo últimas noticias...")
 
     news = await techAI.get_news(mode=techAI.Pipeline.NEWS)
@@ -34,16 +34,17 @@ async def get_news():
         log_main.warning("No se encontraron noticias.")
         return {"error": "No news found"}
 
-    save_news = database.News(
-        title=news["title"],
-        summary=news["summary"],
-        created_at=news["date"],
-        language=news["language"],
-        source=news["source"],
-        url=isoparse(news["url"]),
-    )
+    for item in news:
+        save_news = database.News(
+            title=item["title"],
+            summary=item["summary"],
+            created_at=isoparse(item["date"]),
+            language=item["language"],
+            source=item["source"],
+            url=item["url"],
+        )
 
-    database.save_news(save_news)
+        database.save_news(save_news)
 
     return {"news": news}
 

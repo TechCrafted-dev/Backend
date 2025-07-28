@@ -261,7 +261,6 @@ async def tool_source_news() -> str:
         "{'sources': ['url1', 'url2', ...]}"
         "Asegurate de que las URLs son relevantes y actualizadas."
         "Descarta aquellas fuentes que no estén al día."
-        "No agregues mas de 3"
         "URLs vetadas que no debes agregar:"
         " - https://www.noticias.dev"
     )
@@ -292,21 +291,21 @@ async def tool_get_news(sources: list) -> dict:
         "Eres un asistente que recopila noticias tecnológicas de las fuentes "
         "proporcionadas, con énfasis en programación (Python, Java, JavaScript, "
         "TypeScript, Go, Rust, etc.).\n\n"
-    
-        f"Hoy es {datetime.now().strftime('%d de %B del %Y')}. "
+
+        f"Hoy es {datetime.now().strftime('%d de %B del %Y')}.\n"
         "Solo considera noticias publicadas en los últimos 7 días.\n\n"
-    
+
         "- Analiza únicamente los titulares, no profundices en el contenido completo.\n"
         "- Traduce los títulos al español si están en otro idioma.\n"
         "- Descarta artículos que sean notas de prensa, ofertas de empleo, "
         "eventos o contenido puramente comercial.\n"
         "- Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
         "frameworks o herramientas relevantes para desarrolladores.\n\n"
-    
+
         "Devuelve tu respuesta **exclusivamente** como una lista JSON con la "
         "estructura siguiente (sin texto adicional):\n"
         f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
-    
+
         "Si no encuentras noticias relevantes, devuelve un JSON con una lista "
         "vacía: `[]`.\n"
     )
@@ -323,12 +322,14 @@ async def tool_get_news(sources: list) -> dict:
 )
         try:
             response = await _response(build_kwargs(config="search", system=sys, user=user))
-            msg = next(
-                item for item in response.output
-                if item.type == "message"
-            )
 
-            content = msg.content[0].text.strip()
+            content = None
+            for entry in response.output:
+                if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                    for chunk in entry.content:
+                        if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                            content = chunk.text
+
             content = extract_json(content)
 
         except Exception as e:
