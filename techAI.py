@@ -39,8 +39,8 @@ def extract_json(text: str) -> dict:
             news_data = json.loads(text)
             return news_data
 
-    except json.JSONDecodeError as e:
-        log_techAI.error("Error decodificando JSON de noticias: %s", e)
+    except json.JSONDecodeError:
+        log_techAI.warning("El LLM no devolvió un JSON válido.")
 
     except Exception as e:
         log_techAI.error("Error obteniendo noticias: %s", e)
@@ -256,15 +256,17 @@ async def tool_source_news() -> str:
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
     sys = (
-        "Eres un asistente que proporciona enlaces de fuentes de noticias tecnológicas."
-        "Siempre devuelve una lista de enlaces en formato JSON con la siguiente estructura:"
-        "{'sources': ['url1', 'url2', ...]}"
-        "Asegurate de que las URLs son relevantes y actualizadas."
-        "Descarta aquellas fuentes que no estén al día."
-        "URLs vetadas que no debes agregar:"
+        "Eres un asistente que busca y proporciona enlaces de fuentes de noticias de programación.\n"
+        "Asegurate de que las URLs son relevantes y actualizadas.\n"
+        "Descarta aquellas fuentes que no estén al día.\n\n"
+        
+        "Siempre devuelve una lista de enlaces en formato JSON con la siguiente estructura:\n"
+        "{'sources': ['url1', 'url2', ...]}\n\n"
+        
+        "URLs vetadas que no debes agregar:\n"
         " - https://www.noticias.dev"
     )
-    user = "Proporciona una lista de enlaces a las principales fuentes de noticias relacionadas con programación."
+    user = "Proporciona una lista de fuentes de noticias relacionadas con la programación."
     response = await _response(build_kwargs(config="search", system=sys, user=user))
 
     msg = next(
@@ -287,13 +289,15 @@ async def tool_get_news(sources: list) -> dict:
             "date": "YYYY-MM-DD",
     }
 
+    ayer = datetime.now() - timedelta(days=1)
+
     sys = (
         "Eres un asistente que recopila noticias tecnológicas de las fuentes "
         "proporcionadas, con énfasis en programación (Python, Java, JavaScript, "
         "TypeScript, Go, Rust, etc.).\n\n"
 
-        f"Hoy es {datetime.now().strftime('%d de %B del %Y')}.\n"
-        "Solo considera noticias publicadas en los últimos 7 días.\n\n"
+        f"Hoy es {ayer.strftime('%d de %B del %Y')}.\n"
+        "Solo considera noticias publicadas hoy.\n\n"
 
         "- Analiza únicamente los titulares, no profundices en el contenido completo.\n"
         "- Traduce los títulos al español si están en otro idioma.\n"
@@ -301,6 +305,7 @@ async def tool_get_news(sources: list) -> dict:
         "eventos o contenido puramente comercial.\n"
         "- Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
         "frameworks o herramientas relevantes para desarrolladores.\n\n"
+        "- No inventes información, usa únicamente la fuente dada.\n"
 
         "Devuelve tu respuesta **exclusivamente** como una lista JSON con la "
         "estructura siguiente (sin texto adicional):\n"
@@ -317,9 +322,10 @@ async def tool_get_news(sources: list) -> dict:
         count += 1
 
         user = (
-            f"Aquí tienes la URL de la fuente: {source}. "
-            "Recopila las noticias según las instrucciones del system prompt."
-)
+            "Recopila noticias de programación.\n"
+            f"Aquí tienes la URL de la fuente: {source}."
+        )
+
         try:
             response = await _response(build_kwargs(config="search", system=sys, user=user))
 
@@ -330,6 +336,7 @@ async def tool_get_news(sources: list) -> dict:
                         if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
                             content = chunk.text
 
+            log_techAI.info(content)
             content = extract_json(content)
 
         except Exception as e:
@@ -411,12 +418,15 @@ async def tool_cleanup_news(news_sources: dict) -> list:
 async def tool_redactor(news: list) -> list:
     log_techAI.info("Redactando las noticias...")
     sys = (
-        "Eres un redactor profesional que escribe resúmenes de noticias tecnológicas."
-        "Utiliza un tono directo y profesional, pero cercano."
-        "No incluyas ni fechas ni urls en el resumen."
-        "Al final del resumen, incluye una línea horizontal `---` e invita a visitar la pagina de la noticia."
-        "Devuelve el resultado en formato Markdown."
-        "Usa la fuente y la URL de la noticia para proporcionar contexto."
+        "Eres un redactor profesional que escribe artículos de noticias tecnológicas.\n"
+        "Usa la fuente y la URL de la noticia para proporcionar contexto.\n"
+        "Utiliza un tono directo y profesional, pero cercano.\n"
+        "Devuelve el resultado en formato Markdown.\n\n"
+
+        "Al final del artículo, incluye una línea horizontal `---` e invita a visitar la pagina de la noticia.\n\n"
+
+        "No incluyas ni fechas ni urls en el artículo.\n"
+        "No inventes información, usa únicamente los datos proporcionados.\n"
         "Si la URL de la noticia no es válida, descártala respondiendo únicamente None."
     )
 

@@ -4,15 +4,41 @@ import github
 import uvicorn
 import database
 
+from pytz import timezone
 from dateutil.parser import isoparse
-from config          import LOGGING_CONFIG, log_main
+from contextlib import asynccontextmanager
+from config import LOGGING_CONFIG, log_main
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from fastapi                 import FastAPI
 from fastapi.responses       import PlainTextResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 
-app = FastAPI()
+tz = timezone("Europe/Madrid")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = AsyncIOScheduler(timezone=tz)
+
+    scheduler.add_job(
+        search_news,
+        'cron',
+        hour=22,
+        minute=12,
+        id='search_news_job',
+        replace_existing=True,
+        misfire_grace_time=300)
+
+    scheduler.start()
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS para permitir peticiones desde el frontend
 app.add_middleware(
