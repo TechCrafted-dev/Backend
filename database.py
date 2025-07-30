@@ -194,3 +194,15 @@ def save_news(new_news: News):
         session.add(new_news)
         session.commit()
         log_database.info(f"Noticia {new_news.title} guardada exitosamente.")
+
+
+def get_news():
+    with SessionLocal() as session:
+        news = session.query(News).all()
+        if news:
+            log_database.info(f"{len(news)} noticias recuperadas exitosamente.")
+            return news
+
+        else:
+            log_database.warning("No se encontraron noticias.")
+            return []
