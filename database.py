@@ -93,26 +93,31 @@ def set_repo(new_repo: Repos):
         log_database.info(f"Repositorio {new_repo.name} guardado exitosamente.")
 
 
-def get_repos():
+def get_repos(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
-        repos = session.query(Repos).all()
+        column = getattr(Repos, order_by)
+
+        order_clause = column.desc() if desc else column.asc()
+        repos = session.query(Repos).order_by(order_clause).all()
+
         if repos:
             log_database.info(f"{len(repos)} repositorios recuperados exitosamente.")
             return repos
+
         else:
             log_database.warning("No se encontraron repositorios.")
             return []
 
 
-def get_repo(id: int):
+def get_repo(by_id: int):
     with SessionLocal() as session:
-        repo = session.query(Repos).filter(Repos.id == id).first()
+        repo = session.query(Repos).filter(Repos.id == by_id).first()
         if repo:
             log_database.info(f"Repositorio {repo.name} recuperado exitosamente.")
             return repo
 
         else:
-            log_database.warning(f"Repositorio con ID {id} no encontrado.")
+            log_database.warning(f"Repositorio con ID {by_id} no encontrado.")
             return None
 
 
@@ -140,6 +145,18 @@ def update_repo(updated_repo):
 
         else:
             log_database.warning(f"Repositorio con ID {updated_repo.id} no encontrado para actualizar.")
+
+
+def delete_repo(repo_id: int):
+    with SessionLocal() as session:
+        repo = session.query(Repos).filter(Repos.id == repo_id).first()
+        if repo:
+            session.delete(repo)
+            session.commit()
+            log_database.info(f"Repositorio {repo.name} eliminado exitosamente.")
+
+        else:
+            log_database.warning(f"Repositorio con ID {repo_id} no encontrado para eliminar.")
 
 
 """ POSTS"""
@@ -177,12 +194,17 @@ def update_post(post):
             log_database.warning(f"Post con ID {post.id} no encontrado para actualizar.")
 
 
-def get_posts():
+def get_posts(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
-        posts = session.query(Posts).all()
+        column = getattr(Posts, order_by)
+
+        order_clause = column.desc() if desc else column.asc()
+        posts = session.query(Posts).order_by(order_clause).all()
+
         if posts:
             log_database.info(f"{len(posts)} posts recuperados exitosamente.")
             return posts
+
         else:
             log_database.warning("No se encontraron posts.")
             return []

@@ -24,6 +24,8 @@ def get_user_info():
         log_github.error(f"Error al obtener la información del usuario. Código: {response.status_code}")
         return {}
 
+
+# Obtener la lista de organizaciones del usuario
 def get_user_orgs():
     url = f"https://api.github.com/users/{GITHUB_USERNAME}/orgs"
     response = requests.get(url, headers=HEADERS)
@@ -36,26 +38,27 @@ def get_user_orgs():
         log_github.error(f"Error al obtener la información de organizaciones. Código: {response.status_code}")
         return []
 
+
 # Obtener la lista de repositorios del usuario
-def get_repositories():
+def get_repositories(data, user):
     log_github.info("Fetching user information...")
 
-    url = f"https://api.github.com/users/{GITHUB_USERNAME}/repos?per_page=100"
+    url = f"https://api.github.com/{data}/{user}/repos?per_page=100"
     response = requests.get(url, headers=HEADERS)
-    data = response.json()
+    datas = response.json()
 
     if response.status_code == 200:
         log_github.info("Información del usuario obtenida correctamente.")
-        return data
+        return datas
     else:
         log_github.error(f"Error al obtener la información del usuario. Código: {response.status_code}")
         return {}
 
 
 # Obtener estadísticas de tráfico (vistas y clones) de un repositorio
-def get_repo_traffic(repo_name):
+def get_repo_traffic(data, user, repo_name):
     log_github.info(f"Fetching traffic for {repo_name}...")
-    base_url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo_name}/traffic"
+    base_url = f"https://api.github.com/{data}/{user}/{repo_name}/traffic"
 
     url_views = f"{base_url}/views"
     url_clones = f"{base_url}/clones"
@@ -76,12 +79,12 @@ def get_repo_traffic(repo_name):
 
 # Recopilar datos de los repositorios
 def get_repos_data(order_by="created_at", reverse=True):
-    repos = get_repositories()
+    repos = get_repositories("users", GITHUB_USERNAME)
     repos_data = []
 
     for repo in repos:
         repo_name = repo["name"]
-        traffic = get_repo_traffic(repo_name)
+        traffic = get_repo_traffic("users", GITHUB_USERNAME, repo_name)
 
         log_github.info(f"Traffic for {repo_name}")
 
@@ -109,3 +112,48 @@ def get_repos_data(order_by="created_at", reverse=True):
     repos_data.sort(key=lambda x: x[key], reverse=reverse)
 
     return repos_data
+
+
+def get_orgs_data(order_by="created_at", reverse=True):
+    orgs = get_user_orgs()
+    orgs_data = []
+
+    for org in orgs:
+        org_info = {
+            "id": org["id"],
+            "name": org["login"],
+            "repos": []
+        }
+
+        repos = get_repositories("orgs", org["login"])
+        for repo in repos:
+            repo_name = repo["name"]
+            if repo_name.startswith("."):
+                continue
+
+            traffic = get_repo_traffic("orgs", org["login"], repo_name)
+
+            log_github.info(f"Traffic for {repo_name} in organization {org['login']}")
+
+            repo_info = {
+                "id": repo["id"],
+                "name": repo_name,
+                "description": repo["description"] if repo["description"] else "No description available",
+                "url": repo["html_url"],
+                "language": repo["language"] if repo["language"] else "Unknown",
+                "stars": repo["stargazers_count"],
+                "forks": repo["forks_count"],
+                "watchers": repo["watchers_count"],
+                "views": traffic["views"],
+                "unique_views": traffic["unique_views"],
+                "clones": traffic["clones"],
+                "unique_clones": traffic["unique_clones"],
+                "created_at": repo["created_at"],
+                "updated_at": repo["pushed_at"],
+            }
+
+            org_info["repos"].append(repo_info)
+
+        orgs_data.append(org_info)
+
+    return orgs_data

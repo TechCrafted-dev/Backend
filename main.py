@@ -1,26 +1,27 @@
 import re
+
 import techAI
 import github
 import uvicorn
 import database
 
 from pytz import timezone
+from typing import Optional
 from dateutil.parser import isoparse
 from contextlib import asynccontextmanager
 from config import LOGGING_CONFIG, log_main
+from apiconfig import tags_metadata, Tags, OrderField, OrderDirection
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from fastapi                 import FastAPI
-from fastapi.responses       import PlainTextResponse, JSONResponse
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, JSONResponse
 
-
-tz = timezone("Europe/Madrid")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler = AsyncIOScheduler(timezone=tz)
+    scheduler = AsyncIOScheduler(timezone=timezone("Europe/Madrid"))
 
     scheduler.add_job(
         search_news,
@@ -37,7 +38,14 @@ async def lifespan(app: FastAPI):
     finally:
         scheduler.shutdown(wait=False)
 
-app = FastAPI(lifespan=lifespan)
+
+app = FastAPI(
+    title="TechCrafted API",
+    description="API for TechCrafted, a platform for tech enthusiasts.",
+    version="1.0.0",
+    openapi_tags=tags_metadata,
+    lifespan=lifespan
+)
 
 # CORS para permitir peticiones desde el frontend
 app.add_middleware(
@@ -47,6 +55,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ------ UTILS ------
 async def generate_post_logic(data: dict) -> database.Posts:
@@ -74,7 +83,8 @@ async def generate_post_logic(data: dict) -> database.Posts:
 
 
 # ------ ENDPOINTS ------
-@app.get("/health", response_class=PlainTextResponse,
+@app.get("/health", tags=[Tags.state],
+         response_class=PlainTextResponse,
          summary="Health check endpoint",
          description="Returns 'ok' if the service is running.")
 async def health():
@@ -82,7 +92,7 @@ async def health():
 
 
 # ------ GITHUB USER ENDPOINTS ------
-@app.get("/github-user", summary="Get GitHub user data",
+@app.get("/github-user", tags=[Tags.github], summary="Get GitHub user data",
          description="Fetches and returns the GitHub user data.")
 async def get_github_user():
     try:
@@ -100,7 +110,7 @@ async def get_github_user():
         return {"error": str(e)}
 
 
-@app.get("/github-data", summary="Get GitHub data",
+@app.get("/github-user/data", tags=[Tags.github], summary="Get GitHub data",
          description="Fetches and returns the latest GitHub repository data.")
 async def get_github_data():
     try:
@@ -119,7 +129,7 @@ async def get_github_data():
 
 
 # ------ GITHUB ORGANIZATION ENDPOINTS ------
-@app.get("/github-user/orgs", summary="Get GitHub user organizations",
+@app.get("/github-orgs", tags=[Tags.github_orgs], summary="Get GitHub user organizations",
          description="Fetches and returns the GitHub user organizations.")
 async def get_github_user_orgs():
     try:
@@ -137,27 +147,54 @@ async def get_github_user_orgs():
         return {"error": str(e)}
 
 
-@app.get("/github-data/orgs", summary="Get GitHub organizations data",
+@app.get("/github-orgs/data", tags=[Tags.github_orgs], summary="Get GitHub organizations data",
          description="Fetches and returns the latest GitHub organizations data.")
 async def get_github_orgs_data():
-    pass
-
-
-# ------ REPOSITORIES ENDPOINTS ------
-@app.get("/repos", summary="Get all repositories",
-         description="Returns a list of all repositories stored in the database.")
-async def get_repos():
     try:
-        repos = database.get_repos()
-        return repos
+        log_main.info(f"Fetching GitHub organization data")
+        org_data = github.get_orgs_data()
+
+        if not org_data:
+            log_main.warning(f"No data found for organization.")
+            return {"error": f"No data found for organization"}
+
+        return org_data
 
     except Exception as e:
-        log_main.error(f"Error fetching repositories: {e}")
+        log_main.error(f"Error fetching GitHub organization data: {e}")
         return {"error": str(e)}
 
 
-@app.get("/repos/{repo_id}", summary="Get repository by ID",
-         description="Returns a specific repository by its ID if it exists.")
+# ------ REPOSITORIES ENDPOINTS ------
+@app.get("/repos", tags=[Tags.repos], summary="Get all database repositories",
+         description="Returns a list of all repositories stored in the database.",)
+async def get_repos(
+    order_by: Optional[OrderField] = Query(
+        default=None,
+        description="Campo por el que ordenar"
+    ),
+    direction: OrderDirection = Query(
+        default=OrderDirection.asc,
+        description="Dirección de ordenación (asc o desc)"
+    ),
+):
+    try:
+        if order_by is None:
+            return database.get_repos()
+
+        return database.get_repos(
+            order_by=order_by.value,
+            desc=(direction == OrderDirection.desc)
+        )
+
+    except Exception as e:
+        log_main.error(f"Error fetching repositories: {e}")
+        # Mejor devolver un 500 real
+        raise HTTPException(status_code=500, detail="Error fetching repositories")
+
+
+@app.get("/repos/{repo_id}", tags=[Tags.repos], summary="Get repository by database ID",
+         description="Returns a repository specific by its ID if it exists in the database.")
 async def get_repo(repo_id: int):
     try:
         repo = database.get_repo(repo_id)
@@ -172,114 +209,98 @@ async def get_repo(repo_id: int):
         return {"error": str(e)}
 
 
-@app.post("/repos", summary="Set repositories",
-          description="Fetches repositories from GitHub and saves them to the database if they do not exist.")
-async def set_repos():
-    try:
-        repos = github.get_repos_data()
-
-        for repo in repos:
-            log_main.info(f"Guardando repositorio {repo['name']}...")
-
-            if database.get_repo(repo["id"]) is None:
-                new_repo = database.Repos(
-                    id=repo["id"],
-                    name=repo["name"],
-                    description=repo["description"],
-                    url=repo["url"],
-                    language=repo["language"],
-                    stars=repo["stars"],
-                    forks=repo["forks"],
-                    watchers=repo["watchers"],
-                    views=repo["views"],
-                    unique_views=repo["unique_views"],
-                    clones=repo["clones"],
-                    unique_clones=repo["unique_clones"],
-                    created_at=isoparse(repo["created_at"]),
-                    updated_at=isoparse(repo["updated_at"]),
-                )
-
-                database.set_repo(new_repo)
-
-        log_main.info("All repositories saved successfully.")
-        return {"message": "Repositories saved successfully"}
-
-    except Exception as e:
-        log_main.error(f"Error saving repositories: {e}")
-        return {"error": str(e)}
-
-
-@app.post("/repos/update", summary="Update repositories",
-          description="Fetches repositories from GitHub and updates them in the database if they exist.")
+@app.post("/repos", tags=[Tags.repos], summary="Update all database repositories ",
+          description="Gets GitHub repositories and updates the database.")
 async def update_repos():
+    new_data = github.get_repos_data()
+    old_data = database.get_repos()
+
+    for data in new_data:
+        log_main.info(f"Actualizando repositorio {data['name']}...")
+
+        existing_repo = database.get_repo(data["id"])
+
+        updated_repo = database.Repos(
+            id=data["id"],
+            name=data["name"],
+            description=data["description"],
+            url=data["url"],
+            language=data["language"],
+            stars=data["stars"],
+            forks=data["forks"],
+            watchers=data["watchers"],
+            views=data["views"],
+            unique_views=data["unique_views"],
+            clones=data["clones"],
+            unique_clones=data["unique_clones"],
+            created_at=isoparse(data["created_at"]),
+            updated_at=isoparse(data["updated_at"]),
+        )
+
+        if existing_repo is not None:
+            database.update_repo(updated_repo)
+
+        else:
+            log_main.info(f"Detectado nuevo repositorio {data['name']}, guardando...")
+            database.set_repo(updated_repo)
+
+    for old_repo in old_data:
+        if not any(new_repo["id"] == old_repo.id for new_repo in new_data):
+            log_main.info(f"Repositorio {old_repo.name} no encontrado en los datos nuevos, eliminando...")
+            database.delete_repo(old_repo.id)
+
+    return {"message": "Repositories updated successfully"}
+
+
+@app.delete("/repos/{repo_id}", tags=[Tags.repos], summary="Delete repository by database ID",
+            description="Delete a specific repository by its ID if it exists.")
+async def delete_repo(repo_id: int):
     try:
-        repos = github.get_repos_data()
+        log_main.info(f"Eliminando repositorio {repo_id}...")
 
-        for repo in repos:
-            log_main.info(f"Actualizando repositorio {repo['name']}...")
+        repo = database.get_repo(repo_id)
+        if repo:
+            database.delete_repo(repo_id)
+            return {"message": f"Repository {repo_id} deleted successfully"}
 
-            existing_repo = database.get_repo(repo["id"])
-
-            updated_repo = database.Repos(
-                id=repo["id"],
-                name=repo["name"],
-                description=repo["description"],
-                url=repo["url"],
-                language=repo["language"],
-                stars=repo["stars"],
-                forks=repo["forks"],
-                watchers=repo["watchers"],
-                views=repo["views"],
-                unique_views=repo["unique_views"],
-                clones=repo["clones"],
-                unique_clones=repo["unique_clones"],
-                created_at=isoparse(repo["created_at"]),
-                updated_at=isoparse(repo["updated_at"]),
-            )
-
-            if existing_repo is not None:
-                database.update_repo(updated_repo)
-
-            else:
-                log_main.info(f"Detectado nuevo repositorio {repo['name']}, guardando...")
-                database.set_repo(updated_repo)
-
-        return {"message": "Repositories updated successfully"}
+        else:
+            log_main.warning(f"Repository {repo_id} not found.")
+            return {"error": "Repository not found"}
 
     except Exception as e:
-        log_main.error(f"Error updating repositories: {e}")
+        log_main.error(f"Error deleting repository {repo_id}: {e}")
         return {"error": str(e)}
 
 
 # ------ POSTS ENDPOINTS ------
-@app.get("/posts", summary="Get all posts",
+@app.get("/posts", tags=[Tags.post], summary="Get all posts",
          description="Returns a list of all posts stored in the database.")
-async def get_posts():
+async def get_repos(
+    order_by: Optional[OrderField] = Query(
+        default=None,
+        description="Campo por el que ordenar"
+    ),
+    direction: OrderDirection = Query(
+        default=OrderDirection.asc,
+        description="Dirección de ordenación (asc o desc)"
+    ),
+):
     try:
-        log_main.info("Obteniendo todos los posts...")
+        if order_by is None:
+            return database.get_posts()
 
-        posts = database.get_posts()
-        if posts:
-            return [
-                {
-                    "id": post.id,
-                    "title": post.title,
-                    "description": post.description,
-                    "created_at": post.created_at,
-                    "updated_at": post.updated_at,
-                    "article": post.article
-                } for post in posts
-            ]
-
-        else:
-            return {"error": "No posts found"}
+        return database.get_posts(
+            order_by=order_by.value,
+            desc=(direction == OrderDirection.desc)
+        )
 
     except Exception as e:
-        log_main.error(f"Error fetching posts: {e}")
-        return {"error": str(e)}
+        log_main.error(f"Error fetching repositories: {e}")
+        # Mejor devolver un 500 real
+        raise HTTPException(status_code=500, detail="Error fetching repositories")
 
 
-@app.get("/posts/{repo_id}", summary="Get post by repository ID",
+@app.get("/posts/{repo_id}", tags=[Tags.post], summary="Get post by repository ID",
          description="Returns a specific post by its repository ID if it exists.")
 async def get_post(repo_id: int):
     log_main.info(f"Obteniendo post para repositorio {repo_id}...")
@@ -305,7 +326,7 @@ async def get_post(repo_id: int):
         return {"error": str(e)}
 
 
-@app.put("/posts/update_all", summary="Update all post",
+@app.put("/posts/update_all", tags=[Tags.post], summary="Update all post",
          description="Updates all existing posts in the database based on the latest repository data.")
 async def update_all_posts():
     log_main.info(f"Actualizando todos los posts...")
@@ -348,7 +369,7 @@ async def update_all_posts():
         return {"error": str(e)}
 
 
-@app.put("/posts/{repo_id}", summary="Update post",
+@app.put("/posts/{repo_id}", tags=[Tags.post], summary="Update post",
          description="Updates an existing post for a specific repository by its ID if it exists.")
 async def update_post(repo_id: int):
     try:
@@ -386,7 +407,7 @@ async def update_post(repo_id: int):
         return {"error": str(e)}
 
 
-@app.post("/posts/{repo_id}", response_class=JSONResponse,summary="Generate and save a new post",
+@app.post("/posts/{repo_id}", tags=[Tags.post], response_class=JSONResponse,summary="Generate and save a new post",
          description="Generates a new post based on the provided repository data and saves it to the database if it does not already exist.")
 async def gen_post(repo_id: int):
     try:
@@ -421,7 +442,7 @@ async def gen_post(repo_id: int):
 
 
 # ------ NEWS ENDPOINTS ------
-@app.get("/news", summary="Get all news",
+@app.get("/news", tags=[Tags.news], summary="Get all news",
          description="Returns a list of all news articles stored in the database.")
 async def get_news():
     log_main.info("Obteniendo todas las noticias...")
@@ -447,7 +468,7 @@ async def get_news():
         return {"error": str(e)}
 
 
-@app.post("/search_news", summary="Get latest news",
+@app.post("/search_news", tags=[Tags.news], summary="Get latest news",
          description="Fetches the latest news from the techAI service.")
 async def search_news():
     log_main.info("Obteniendo últimas noticias...")
