@@ -2,18 +2,17 @@ import re
 import uvicorn
 import requests
 
-import github
-import techAI
-import database
-
 from pytz import timezone
 from typing import Optional
 from dateutil.parser import isoparse
 from requests.auth import HTTPBasicAuth
 from contextlib import asynccontextmanager
 
-from config import LOGGING_CONFIG, log_main, GITEA
-from apiconfig import tags_metadata, Tags, OrderField, OrderDirection
+from modules import database, github, techAI             # Módulos de la aplicación
+from modules.config import settings                      # Configuración de la aplicación
+from modules.config import tags_metadata, Tags           # Rutas Tags del Swagger
+from modules.config import LOGGING_CONFIG, log_main      # Configuración de logging
+from modules.config import OrderField, OrderDirection    # Ordenación de los repositorios
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -79,6 +78,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ------ Gitea config ------
+GITEA_DATA   = settings['GITEA']
+GITEA_URL    = GITEA_DATA['url']
+GITEA_USER   = GITEA_DATA['user']
+GITEA_TOKEN  = GITEA_DATA['token']
+GITEA_BLOG   = GITEA_DATA['blog']
+GITEA_NEWS   = GITEA_DATA['news']
 
 
 # ------ UTILS ------
@@ -399,8 +406,8 @@ async def update_all_posts():
             log_main.info("Se han realizado cambios en la base de datos")
             log_main.info("Reconstruyendo BlogPage...")
 
-            url = f"{GITEA['url']}/job/{GITEA['blog']}/job/main/build"
-            response = requests.post(url, auth=HTTPBasicAuth(GITEA['user'], GITEA['token']))
+            url = f"{GITEA_URL}/job/{GITEA_BLOG}/job/main/build"
+            response = requests.post(url, auth=HTTPBasicAuth(GITEA_USER, GITEA_TOKEN))
 
             if response.status_code == 201:
                 log_main.info("BlogPage reconstruido correctamente.")
