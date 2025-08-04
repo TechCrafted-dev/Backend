@@ -1,15 +1,18 @@
 import re
-
-import techAI
-import github
 import uvicorn
+import requests
+
+import github
+import techAI
 import database
 
 from pytz import timezone
 from typing import Optional
 from dateutil.parser import isoparse
+from requests.auth import HTTPBasicAuth
 from contextlib import asynccontextmanager
-from config import LOGGING_CONFIG, log_main
+
+from config import LOGGING_CONFIG, log_main, GITEA
 from apiconfig import tags_metadata, Tags, OrderField, OrderDirection
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 
 
+# ------ Schedule Setup ------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler(timezone=timezone("Europe/Madrid"))
@@ -32,6 +36,25 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         misfire_grace_time=300)
 
+    scheduler.add_job(
+        update_repos,
+        'cron',
+        hour=23,
+        minute=0,
+        id='update_repos_job',
+    )
+
+    scheduler.add_job(
+        update_all_posts,
+        'cron',
+        day_of_week='wed',
+        hour=0,
+        minute=0,
+        id='update_all_posts_job',
+        replace_existing=True,
+        misfire_grace_time=300
+    )
+
     scheduler.start()
     try:
         yield
@@ -39,6 +62,7 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
 
 
+# ------ FastAPI Setup ------
 app = FastAPI(
     title="TechCrafted API",
     description="API for TechCrafted, a platform for tech enthusiasts.",
@@ -47,7 +71,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS para permitir peticiones desde el frontend
+# ------ FastAPI CORS ------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # ajusta a tu dominio en producción
@@ -58,11 +82,14 @@ app.add_middleware(
 
 
 # ------ UTILS ------
-async def generate_post_logic(data: dict) -> database.Posts:
+async def generate_post_logic(data: dict, pipeline) -> database.Posts | None:
     try:
         log_main.info(f"Generando post para repositorio {data['name']}...")
 
-        response = await techAI.gen_post(data, mode=techAI.Pipeline.POST)
+        response = await techAI.gen_post(data, mode=pipeline)
+        if response is None:
+            return response
+
         markdown_pattern = re.compile(r'```markdown\n(.*?)```', re.DOTALL)
         post = ''.join(markdown_pattern.findall(response)) or response
 
@@ -338,6 +365,7 @@ async def update_all_posts():
             return {"error": "No repositories found"}
 
 
+        update = False
         count = 1
         for repo in repos:
             log_main.info(f"{count}/{len(repos)} Repositorio {repo.id} - {repo.name}")
@@ -358,9 +386,27 @@ async def update_all_posts():
                 "updated_at": repo.updated_at.isoformat(),
             }
 
-            post = await generate_post_logic(repo_json)
-            database.update_post(post)
+            pipeline = techAI.Pipeline.EVAL
+            post = await generate_post_logic(repo_json, pipeline)
+
+            if post is not None:
+                database.update_post(post)
+                update = True
+
             count += 1
+
+        if update:
+            log_main.info("Se han realizado cambios en la base de datos")
+            log_main.info("Reconstruyendo BlogPage...")
+
+            url = f"{GITEA['url']}/job/{GITEA['blog']}/job/main/build"
+            response = requests.post(url, auth=HTTPBasicAuth(GITEA['user'], GITEA['token']))
+
+            if response.status_code == 201:
+                log_main.info("BlogPage reconstruido correctamente.")
+
+            else:
+                log_main.error(f"Error al reconstruir BlogPage: {response.status_code} - {response.text}")
 
         return {"message": "All posts updated successfully"}
 
@@ -394,7 +440,8 @@ async def update_post(repo_id: int):
         }
 
         if repo:
-            post = await generate_post_logic(repo_json)
+            pipeline = techAI.Pipeline.POST
+            post = await generate_post_logic(repo_json, pipeline)
             database.update_post(post)
 
             return {"message": "Post updated successfully"}
@@ -429,7 +476,8 @@ async def gen_post(repo_id: int):
             "updated_at": repo.updated_at.isoformat(),
         }
 
-        new_post = await generate_post_logic(repo_json)
+        pipeline = techAI.Pipeline.POST
+        new_post = await generate_post_logic(repo_json, pipeline)
 
         if database.get_post(repo_id) is None:
             database.save_post(new_post)

@@ -2,7 +2,9 @@ import re
 import json
 import httpx
 
+from typing import Any
 from enum   import Enum, auto
+from dateutil.parser import isoparse
 from datetime import datetime, timedelta
 
 from openai import AsyncOpenAI, RateLimitError
@@ -25,7 +27,7 @@ CAPABILITIES = {
 
 
 # ---------- UTILS ----------
-def extract_json(text: str) -> dict:
+def extract_json(text: str) -> list[Any] | Any:
     match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
 
     try:
@@ -61,7 +63,7 @@ def build_kwargs(*, config: str, system: str, user: str):
 
     # TOKENS
     if caps.get("max_output_tokens"):
-        kwargs["max_output_tokens"] = MAX_TOKENS
+        kwargs["max_output_tokens"] = str(MAX_TOKENS)
 
     # BUSCADOR
     if caps.get("search"):
@@ -87,11 +89,11 @@ def build_kwargs(*, config: str, system: str, user: str):
 async def _chat(system: str, user: str) -> str:
     try:
         response = await aclient.chat.completions.create(
-            model       = MODEL,
-            temperature = TEMP,
-            messages    = [
+            model=MODEL,
+            temperature=TEMP,
+            messages=[
                 {"role": "system", "content": system},
-                {"role": "user",   "content": user }
+                {"role": "user", "content": user}
             ]
         )
 
@@ -151,7 +153,7 @@ async def tool_fetch_readme(repo_meta: dict) -> str:
         raise
 
 
-# - Analiza el repo y genera puntos clave
+# - Analiza el repo y genera puntos clave [_chat]
 async def tool_analyze_repo(repo_meta: dict, readme: str) -> str:
     log_techAI.info("Analizando repositorio...")
 
@@ -159,16 +161,17 @@ async def tool_analyze_repo(repo_meta: dict, readme: str) -> str:
         "Eres un desarrollador que revisa su propio repositorio para preparar un post. "
         "Hablas siempre en primera persona singular."
     )
-    user = f"""
-Estos son los METADATOS de mi repositorio y su README sin procesar.
-======== METADATOS ========
-{json.dumps(repo_meta, ensure_ascii=False, indent=2)}
-======== README ========
-{readme[:4000]}  <!-- recorta a 4 k tokens aprox -->
-----
-1⃣ Resúmeme en bullet-points (máx 10) qué hace el proyecto.
-2⃣ Destaca cuál es el problema que resuelve y a quién beneficia.
-"""
+
+    user = (
+        "Estos son los METADATOS de mi repositorio y su README sin procesar.\n\n"
+        "======== METADATOS ========\n"
+        f"{json.dumps(repo_meta, ensure_ascii=False, indent=2)}\n\n"
+        "======== README ========\n"
+        f"{readme[:800]}\n\n" # recorta a 8k  tokens approx 
+        "----\n\n"
+        "1⃣ Resúmeme en bullet-points (máx 10) qué hace el proyecto.\n"
+        "2⃣ Destaca cuál es el problema que resuelve y a quién beneficia."
+    )
 
     try:
         analysis = await _chat(sys, user)
@@ -179,7 +182,7 @@ Estos son los METADATOS de mi repositorio y su README sin procesar.
         raise
 
 
-# - Genera un outline basado en los puntos clave
+# - Genera un outline basado en los puntos clave [_chat]
 async def tool_generate_outline(key_points: str) -> str:
     log_techAI.info("Generando outline del artículo...")
     sys = "Eres un copywriter técnico que estructura artículos en Markdown."
@@ -202,39 +205,49 @@ Con base en los siguientes puntos clave, diseña una estructura Markdown:
         raise
 
 
-# - Escribe el post completo en Markdown
+# - Escribe el post completo en Markdown [_chat]
 async def tool_write_post(outline_json: str, repo_meta: dict, readme: str) -> str:
     log_techAI.info("Escribiendo el post completo...")
     sys = (
         "Eres el autor del repositorio, escribiendo un post profesional en primera persona. "
         "Estilo directo, cercano, con ejemplos de uso cuando proceda."
     )
-    user = f"""
-=== OUTLINE (JSON) ===
-{outline_json}
 
-=== METADATOS ===
-{json.dumps(repo_meta, ensure_ascii=False, indent=2)}
+    user = (
+        "=== OUTLINE (JSON) ===\n"
+        f"{outline_json}\n\n"
+        
+        "=== METADATOS ===\n"
+        f"{json.dumps(repo_meta, ensure_ascii=False, indent=2)}\n\n"
+        
+        "=== README (recortado) ===\n"
+        f"{readme[:4000]}\n\n"
+        
+        "- Redacta el artículo completo en Markdown.\n"
+        "- Cada subtítulo del outline debe ser un encabezado H2.\n"
+        "- Incluye fragmentos de código relevantes si aportan valor.\n"
+        "- Mantén entre 400 y 800 palabras.\n"
+        "- Termina con una línea horizontal `---` y un call-to-action invitando a visitar el repo y enviar feedback.\n"
+    )
 
-=== README (recortado) ===
-{readme[:4000]}
-
-- Redacta el artículo completo en Markdown.
-- Cada subtítulo del outline debe ser un encabezado H2.
-- Incluye fragmentos de código relevantes si aportan valor.
-- Mantén entre 400 y 800 palabras.
-- Termina con una línea horizontal `---` y un call-to-action invitando a visitar el repo y enviar feedback.
-"""
     try:
-        post = await _chat(sys, user)
-        return post
+        response = await _response(build_kwargs(config="reasoner", system=sys, user=user))
+
+        data = None
+        for entry in response.output:
+            if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                for chunk in entry.content:
+                    if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                        data = chunk.text
+
+        return data
 
     except Exception as e:
         log_techAI.error("Error escribiendo el post: %s", e)
         raise
 
 
-# - Limpia el Markdown final
+# - Limpia el Markdown final [_chat]
 async def tool_markdown_polish(draft_md: str) -> str:
     log_techAI.info("Depurando el Markdown final...")
     sys = (
@@ -251,8 +264,8 @@ async def tool_markdown_polish(draft_md: str) -> str:
     return cleaned
 
 
-# - Obtiene enlaces de proveedores de noticias más importantes
-async def tool_source_news() -> str:
+# - Obtiene enlaces de proveedores de noticias más importantes [_response]
+async def tool_source_news() -> list:
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
     sys = (
@@ -279,7 +292,7 @@ async def tool_source_news() -> str:
     return sources.get('sources', [])
 
 
-# - Obtiene noticias de las fuentes proporcionadas
+# - Obtiene noticias de las fuentes proporcionadas [_response]
 async def tool_get_news(sources: list) -> dict:
     log_techAI.info(f"Obteniendo noticias de {len(sources)} fuentes:")
 
@@ -349,7 +362,7 @@ async def tool_get_news(sources: list) -> dict:
     return news
 
 
-# - Clasifica las noticias más relevantes
+# - Clasifica las noticias más relevantes [_response]
 async def tool_cleanup_news(news_sources: dict) -> list:
     log_techAI.info("Limpiando y clasificando noticias...")
 
@@ -414,7 +427,7 @@ async def tool_cleanup_news(news_sources: dict) -> list:
     return clear_news
 
 
-# - Redacta las noticias en formato Markdown
+# - Redacta las noticias en formato Markdown [_response]
 async def tool_redactor(news: list) -> list:
     log_techAI.info("Redactando las noticias...")
     sys = (
@@ -475,17 +488,27 @@ async def tool_redactor(news: list) -> list:
 
 # ---------- PIPELINES ----------
 class Pipeline(Enum):
-    TEST = auto()  # Para pruebas
-    POST = auto()  # Para generar posts
-    NEWS = auto()  # Para obtener noticias
+    TEST = auto()         # Para pruebas
+    EVAL = auto()         # Para comprobar si ha cambiado
+    POST = auto()         # Para generar posts
+    NEWS = auto()         # Para obtener noticias
 
 
-async def run_pipeline(data: dict, mode: Pipeline) -> str:
+async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
 
     if mode is Pipeline.TEST:
         log_techAI.info("Modo de prueba activado.")
         return "Pipeline de prueba ejecutado correctamente."
+
+    if mode is Pipeline.EVAL:
+        last_date = isoparse(data['updated_at'])
+        if last_date > datetime.now() - timedelta(days=7):
+            log_techAI.warning("El repositorio ha sido actualizado recientemente.")
+            mode = Pipeline.POST
+
+        else:
+            log_techAI.info("No es necesario actualizar el Post.")
 
     if mode is Pipeline.POST:
         readme = await tool_fetch_readme(data)
@@ -507,13 +530,16 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str:
 
 
 # ---------- GENERATE POST ----------
-async def gen_post(data: dict, mode: Pipeline) -> str:
+async def gen_post(data, mode: Pipeline) -> str:
     log_techAI.info("Generando post...")
 
     try:
         data = data if isinstance(data, dict) else json.loads(data)
         response = await run_pipeline(data, mode)
-        log_techAI.info("Post generado con éxito.")
+
+        if response is None:
+            log_techAI.info("Post generado con éxito.")
+
         return response
 
     except Exception as e:
@@ -524,7 +550,7 @@ async def gen_post(data: dict, mode: Pipeline) -> str:
 # ---------- GET NEWS ----------
 async def get_news(mode: Pipeline) -> list:
     try:
-        response = await run_pipeline(None, mode)
+        response = await run_pipeline({}, mode)
         log_techAI.info(response)
         return response
 
