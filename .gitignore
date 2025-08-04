@@ -1,0 +1,55 @@
+# # Archivos de configuración y secretos
+# Ignorar el archivo de configuración real que contiene secretos.
+data/config.json
+
+# # Entornos virtuales de Python
+# No queremos subir las dependencias instaladas, solo el archivo que las define (requirements.txt o pyproject.toml).
+venv/
+env/
+.venv/
+.env/
+*/activate
+
+# # Artefactos de Python
+# Archivos de bytecode y caché que Python genera automáticamente.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# # Archivos de distribución y construcción
+# Generados al crear un paquete de Python.
+build/
+dist/
+*.egg-info/
+*.egg
+
+# # Metadatos del instalador de paquetes
+pip-wheel-metadata/
+pip-log.txt
+
+# # Archivos del IDE y editores de código
+# Configuración específica del entorno de desarrollo local.
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# # Archivos del sistema operativo
+# Archivos de metadatos de macOS y Windows.
+.DS_Store
+Thumbs.db
+
+# # Logs y bases de datos locales
+# Archivos de registro o bases de datos SQLite de prueba.
+*.log
+*.db
+*.sqlite3
+
+# # Informes de pruebas y cobertura
+# Resultados de herramientas como pytest y coverage.
+.pytest_cache/
+.coverage
+htmlcov/
+nosetests.xml
+coverage.xml
