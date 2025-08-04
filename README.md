@@ -34,14 +34,19 @@ El servicio expone una API REST construida con FastAPI y respaldada por SQLAlche
 ### Arquitectura en un vistazo
 
 ```
-                   ┌────────┐      ┌───────────┐      ┌──────────┐
- [GitHub API] ───► │ github │ ───► │  FastAPI  │ ───► │ database │ ───► [SQLITE]
-                   └────────┘      └───────────┘      └──────────┘
-                                        ▲
-                                        │
-                               ┌─────────────────┐
-             [OpenAI]  ──────► │ techAI Pipeline │
-                               └─────────────────┘
+                            ┌─────────┐       ┌── build ──┐
+                            │ Jenkins │ ────► │ Blog Page │
+          [GitHub API]      └─────────┘       └───────────┘
+               │                 ▲                  ▲
+               ▼                 │                  │
+           ┌────────┐       ╔═══════════╗      ┌──────────┐
+           │ github │ ────► ║  FastAPI  ║ ───► │ database │
+           └────────┘       ╚═══════════╝      └──────────┘
+                                 ▲                  │
+                                 │                  ▼
+                        ┌─────────────────┐     [SQLITE]
+        [OpenAI]  ────► │ techAI Pipeline │
+                        └─────────────────┘
 ```
 
 
@@ -70,12 +75,16 @@ $ source .venv/bin/activate
 # 3. Instala dependencias
 $ pip install -r requirements.txt
 
-# 4. Copia la plantilla de configuración
-$ cp config_template.py config.py
-# → Rellena las variables sensibles (tokens, API keys, etc.)
+# 4. Configura tus variables de entorno
+# Copia el archivo de ejemplo y añade tus claves de API
+$ cp .env.example .env
+
+# → Renombra el archivo config_template.json a config.json
+# → Edita config.json con tus ajustes específicos:
 
 # 5. Inicia la API
-$ uvicorn main:app --reload
+$ uvicorn main:modules --reload
+
 ```
 
 
@@ -86,7 +95,7 @@ $ docker build -t techcrafted-api:latest .
 $ mkdir -p ${HOME}/techcrafted-api/data
 $ docker run -d -p 3000:3000 \
     --restart unless-stopped \
-    -v ${HOME}/techcrafted-api/data:/app/data \
+    -v ${HOME}/techcrafted-api/data:/modules/data \
     techcrafted-api:latest
 ```
 
@@ -95,13 +104,14 @@ $ docker run -d -p 3000:3000 \
 
 ### Principales endpoints
 
-| Método | Ruta            | Descripción                              |
-| ------ |-----------------| ---------------------------------------- |
-| GET    | `/health`       | Comprobación de estado de la aplicación. |
-| GET    | `/repos`        | Lista los repositorios almacenados.      |
-| POST   | `/repos/update` | Fuerza la actualización de métricas.     |
-| GET    | `/posts`        | Devuelve los artículos generados.        |
-| POST   | `/posts`        | Ejecuta la pipeline de IA y crea un post |
+| Método | Ruta                | Descripción                                              |
+| ------ |---------------------|----------------------------------------------------------|
+| GET    | `/health`           | Comprobación de estado de la aplicación.                 |
+| GET    | `/github_user`      | Devuelve los datos de usuario en GitHub.                 |
+| GET    | `/repos`            | Lista los repositorios almacenados.                      |
+| POST   | `/repos`            | Fuerza la actualización de métricas de los repositorios. |
+| GET    | `/posts`            | Devuelve los artículos generados.                        |
+| POST   | `/posts/update_all` | Regenera los post si han habido cambios en el repositio  |
 
 Descubre el resto en el [SWAGGER](http://localhost:3000/docs) una vez que la API esté corriendo.
 
