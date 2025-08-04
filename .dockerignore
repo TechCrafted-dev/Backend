@@ -1,45 +1,38 @@
-# # Ignorar todo lo relacionado con Git y Docker
-# No son necesarios dentro de la imagen y contienen metadatos de construcción.
+# Git y Docker
 .git/
 .gitignore
 .dockerignore
 Dockerfile
 docker-compose.yml
 
-# # Entornos virtuales locales y dependencias
-# La imagen de Docker construirá su propio entorno limpio.
+# Entornos virtuales locales y dependencias
 venv/
 env/
 .venv/
 .env/
 
-# # Archivos de configuración y secretos
-# La configuración real no debe estar en la imagen. Se debe montar como un volumen o
-# pasar a través de variables de entorno en producción.
+# Archivos de configuración y secretos
 data/config.json
 *.env
 
-# # Artefactos de Python
-# La imagen generará los suyos si es necesario.
+# Artefactos de Python
 __pycache__/
 *.pyc
 *.pyo
 
-# # Archivos del IDE
-# Totalmente innecesarios en la imagen.
+# Archivos del IDE
 .idea/
 .vscode/
 
-# # Documentación y archivos auxiliares
-# El README y otros archivos de desarrollo no son necesarios para que la app se ejecute.
+# Documentación y archivos auxiliares
 README.md
 entrypoint.sh
 *.md
 
-# # Archivos del sistema operativo
+# Archivos del sistema operativo
 .DS_Store
 
-# # Informes de pruebas
+# Informes de pruebas
 .pytest_cache/
 .coverage
 htmlcov/
