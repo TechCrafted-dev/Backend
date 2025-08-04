@@ -1,6 +1,63 @@
-import logging
+import json
 import logging.config
 
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List
+
+
+class Tags(str, Enum):
+    state = "States"
+    github = "GitHub"
+    github_orgs = "GitHub Orgs"
+    repos = "Repositories"
+    post = "Post"
+    news = "News"
+
+
+class OrderField(str, Enum):
+    id = "id"
+    name = "name"
+    created_at = "created_at"
+    updated_at = "updated_at"
+
+
+class OrderDirection(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+
+def load_config() -> dict:
+    try:
+        with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"El archivo de configuración no encontrado"
+        )
+
+
+TAG_DESCRIPTIONS: Dict[str, str] = {
+    Tags.state.value:       "API health and resources.",
+    Tags.github.value:      "Operations on the GitHub user.",
+    Tags.github_orgs.value: "Consultation of user organizations on GitHub.",
+    Tags.repos.value:       "Repository CRUD.",
+    Tags.post.value:        "Posts generated from repositories.",
+    Tags.news.value:        "Search and publication of news.",
+}
+
+
+tags_metadata: List[Dict[str, Any]] = [
+    {
+        "name": tag.value,
+        "description": TAG_DESCRIPTIONS.get(tag.value),
+    }
+    for tag in Tags
+]
+
+
+CONFIG_FILE_PATH = Path(__file__).parent / ".." / "data" / "config.json"
 
 # Configuración centralizada de logging
 LOGGING_CONFIG = {
@@ -69,10 +126,4 @@ log_database = logging.getLogger("database")
 log_github = logging.getLogger("github")
 log_techAI = logging.getLogger("techAI")
 
-
-# Configuración de GitHub
-GITHUB_USERNAME = ""
-GITHUB_TOKEN = ""
-
-# Configuración de OpenAI
-OPENAI_API_KEY = ""
+settings = load_config()

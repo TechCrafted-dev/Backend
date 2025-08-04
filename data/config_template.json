@@ -1,0 +1,24 @@
+{
+  "GITHUB": {
+    "user": "",
+    "token": "",
+    "repos": [
+      ""
+    ],
+    "orgs": [
+      ""
+    ]
+  },
+
+  "GITEA": {
+    "user": "",
+    "token": "",
+    "blog": "",
+    "news": "",
+    "url": ""
+  },
+
+  "OPENAI": {
+    "API-KEY": ""
+  }
+}
