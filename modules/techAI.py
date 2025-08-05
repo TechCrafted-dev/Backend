@@ -65,7 +65,7 @@ def build_kwargs(*, config: str, system: str, user: str):
 
     # TOKENS
     if caps.get("max_output_tokens"):
-        kwargs["max_output_tokens"] = str(MAX_TOKENS)
+        kwargs["max_output_tokens"] = MAX_TOKENS
 
     # BUSCADOR
     if caps.get("search"):
