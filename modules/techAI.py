@@ -207,7 +207,7 @@ Con base en los siguientes puntos clave, diseña una estructura Markdown:
         raise
 
 
-# - Escribe el post completo en Markdown [_chat]
+# - Escribe el post completo en Markdown [_response][reasoner]
 async def tool_write_post(outline_json: str, repo_meta: dict, readme: str) -> str:
     log_techAI.info("Escribiendo el post completo...")
     sys = (
@@ -266,7 +266,7 @@ async def tool_markdown_polish(draft_md: str) -> str:
     return cleaned
 
 
-# - Obtiene enlaces de proveedores de noticias más importantes [_response]
+# - Obtiene enlaces de proveedores de noticias más importantes [_response][search]
 async def tool_source_news() -> list:
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
@@ -294,7 +294,7 @@ async def tool_source_news() -> list:
     return sources.get('sources', [])
 
 
-# - Obtiene noticias de las fuentes proporcionadas [_response]
+# - Obtiene noticias de las fuentes proporcionadas [_response][search]
 async def tool_get_news(sources: list) -> dict:
     log_techAI.info(f"Obteniendo noticias de {len(sources)} fuentes:")
 
@@ -304,15 +304,13 @@ async def tool_get_news(sources: list) -> dict:
             "date": "YYYY-MM-DD",
     }
 
-    ayer = datetime.now() - timedelta(days=1)
-
     sys = (
         "Eres un asistente que recopila noticias tecnológicas de las fuentes "
         "proporcionadas, con énfasis en programación (Python, Java, JavaScript, "
         "TypeScript, Go, Rust, etc.).\n\n"
 
-        f"Hoy es {ayer.strftime('%d de %B del %Y')}.\n"
-        "Solo considera noticias publicadas hoy.\n\n"
+        f"Hoy es {datetime.now().strftime('%d de %B del %Y')}.\n"
+        "Considera únicamente las noticias publicadas esta semana.\n\n"
 
         "- Analiza únicamente los titulares, no profundices en el contenido completo.\n"
         "- Traduce los títulos al español si están en otro idioma.\n"
@@ -364,7 +362,7 @@ async def tool_get_news(sources: list) -> dict:
     return news
 
 
-# - Clasifica las noticias más relevantes [_response]
+# - Clasifica las noticias más relevantes [_response][reasoner]
 async def tool_cleanup_news(news_sources: dict) -> list:
     log_techAI.info("Limpiando y clasificando noticias...")
 
@@ -404,12 +402,14 @@ async def tool_cleanup_news(news_sources: dict) -> list:
 
         log_techAI.info("Fuente: %s", site)
 
-        user = ("Analiza atentamente las noticias proporcionadas."
-                "Deben estar relacionadas con programación: Python, Java, JavaScript, etc."
-                "Descarta aquellas que no aporten valor, que sean irrelevantes o que estén duplicadas."
-                "Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
-                "frameworks o herramientas relevantes para desarrolladores"
-                f"\n{json.dumps(news, ensure_ascii=False, indent=2)}")
+        user = (
+            "Analiza atentamente las noticias proporcionadas."
+            "Deben estar relacionadas con programación: Python, Java, JavaScript, etc."
+            "Descarta aquellas que no aporten valor, que sean irrelevantes o que estén duplicadas."
+            "Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
+            "frameworks o herramientas relevantes para desarrolladores"
+            f"\n{json.dumps(news, ensure_ascii=False, indent=2)}"
+        )
 
         try:
             response = await _response(build_kwargs(config="reasoner", system=sys, user=user))
@@ -429,7 +429,7 @@ async def tool_cleanup_news(news_sources: dict) -> list:
     return clear_news
 
 
-# - Redacta las noticias en formato Markdown [_response]
+# - Redacta las noticias en formato Markdown [_response][search]
 async def tool_redactor(news: list) -> list:
     log_techAI.info("Redactando las noticias...")
     sys = (
