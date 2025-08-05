@@ -46,6 +46,13 @@ class News(Base):
     source = Column(String, nullable=False)                      # Fuente de la noticia
     url = Column(String, nullable=False)                         # URL de la noticia
 
+class NewsSource(Base):
+    __tablename__ = 'news_source'
+    id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la fuente de noticias
+    url = Column(String, nullable=False)                         # URL de la fuente de noticias
+    rss = Column(String, nullable=False)                         # URL del RSS de la fuente
+    added_at = Column(DateTime, nullable=False)                  # Fecha de adición de la fuente
+    score = Column(Integer, nullable=False, default=0)           # Puntuación de la fuente
 
 # Configuración de la base de datos SQLite
 DATABASE_URL = "sqlite:///data/repositories.db"
@@ -84,6 +91,10 @@ if not inspector.has_table("news"):
     Base.metadata.tables['news'].create(engine)
     log_database.info("Tabla 'news' creada exitosamente.")
 
+if not inspector.has_table("news_source"):
+    Base.metadata.tables['news_source'].create(engine)
+    log_database.info("Tabla 'news_source' creada exitosamente.")
+
 
 """ REPOSITORIOS """
 def set_repo(new_repo: Repos):
@@ -91,7 +102,6 @@ def set_repo(new_repo: Repos):
         session.add(new_repo)
         session.commit()
         log_database.info(f"Repositorio {new_repo.name} guardado exitosamente.")
-
 
 def get_repos(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
@@ -108,7 +118,6 @@ def get_repos(order_by: str = "id", desc: bool = True):
             log_database.warning("No se encontraron repositorios.")
             return []
 
-
 def get_repo(by_id: int):
     with SessionLocal() as session:
         repo = session.query(Repos).filter(Repos.id == by_id).first()
@@ -119,7 +128,6 @@ def get_repo(by_id: int):
         else:
             log_database.warning(f"Repositorio con ID {by_id} no encontrado.")
             return None
-
 
 def update_repo(updated_repo):
     with SessionLocal() as session:
@@ -146,7 +154,6 @@ def update_repo(updated_repo):
         else:
             log_database.warning(f"Repositorio con ID {updated_repo.id} no encontrado para actualizar.")
 
-
 def delete_repo(repo_id: int):
     with SessionLocal() as session:
         repo = session.query(Repos).filter(Repos.id == repo_id).first()
@@ -166,7 +173,6 @@ def save_post(new_post: Posts):
         session.commit()
         log_database.info(f"Post {new_post.title} guardado exitosamente.")
 
-
 def get_post(repo_id):
     with SessionLocal() as session:
         post = session.query(Posts).filter(Posts.id == repo_id).first()
@@ -177,7 +183,6 @@ def get_post(repo_id):
         else:
             log_database.warning(f"Post con ID {repo_id} no encontrado.")
             return None
-
 
 def update_post(post):
     with SessionLocal() as session:
@@ -192,7 +197,6 @@ def update_post(post):
 
         else:
             log_database.warning(f"Post con ID {post.id} no encontrado para actualizar.")
-
 
 def get_posts(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
@@ -217,7 +221,6 @@ def save_news(new_news: News):
         session.commit()
         log_database.info(f"Noticia {new_news.title} guardada exitosamente.")
 
-
 def get_news():
     with SessionLocal() as session:
         news = session.query(News).all()
@@ -227,4 +230,76 @@ def get_news():
 
         else:
             log_database.warning("No se encontraron noticias.")
+            return []
+
+
+""" FUENTES DE NOTICIAS """
+def save_news_source(new_source: NewsSource):
+    with SessionLocal() as session:
+        session.add(new_source)
+        session.commit()
+        log_database.info(f"Fuente de noticias {new_source.url} guardada exitosamente.")
+
+def get_news_sources():
+    with SessionLocal() as session:
+        sources = session.query(NewsSource).all()
+        if sources:
+            log_database.info(f"{len(sources)} fuentes de noticias recuperadas exitosamente.")
+            return sources
+
+        else:
+            log_database.warning("No se encontraron fuentes de noticias.")
+            return []
+
+def get_news_source_by_id(source_id: int):
+    with SessionLocal() as session:
+        source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
+        if source:
+            log_database.info(f"Fuente de noticias {source.url} recuperada exitosamente.")
+            return source
+
+        else:
+            log_database.warning(f"Fuente de noticias con ID {source_id} no encontrada.")
+            return None
+
+def get_id_by_news_source(url: str):
+    with SessionLocal() as session:
+        source = session.query(NewsSource).filter(NewsSource.url == url).first()
+        if source:
+            log_database.info(f"ID de la fuente de noticias {url} recuperado exitosamente.")
+            return source.id
+
+        else:
+            log_database.warning(f"Fuente de noticias con URL {url} no encontrada.")
+            return None
+
+def update_news_source_by_id(source_id: int, updated_source: NewsSource):
+    with SessionLocal() as session:
+        existing_source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
+        if existing_source:
+            existing_source.url = updated_source.url
+            existing_source.rss = updated_source.rss
+            existing_source.added_at = updated_source.added_at
+            existing_source.score = updated_source.score
+            session.commit()
+            log_database.info(f"Fuente de noticias con ID {source_id} actualizada exitosamente.")
+
+        else:
+            log_database.warning(f"Fuente de noticias con ID {source_id} no encontrada para actualizar.")
+
+def get_news_source_by_score(score: int, comparison: str = "greater"):
+    with SessionLocal() as session:
+        if comparison == "greater":
+            sources = session.query(NewsSource).filter(NewsSource.score > score).all()
+        elif comparison == "less":
+            sources = session.query(NewsSource).filter(NewsSource.score < score).all()
+        else:
+            log_database.warning("Comparación inválida. Use 'greater' o 'less'.")
+            return []
+
+        if sources:
+            log_database.info(f"{len(sources)} fuentes de noticias recuperadas exitosamente con score {comparison} a {score}.")
+            return sources
+        else:
+            log_database.warning(f"No se encontraron fuentes de noticias con score {comparison} a {score}.")
             return []

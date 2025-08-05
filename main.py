@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         search_news,
         'cron',
-        day_of_week='sun'
+        day_of_week='sun',
         hour=0,
         minute=0,
         id='search_news_job',
@@ -124,6 +124,18 @@ async def generate_post_logic(data: dict, pipeline) -> database.Posts | None:
          description="Returns 'ok' if the service is running.")
 async def health():
     return "ok"
+
+
+@app.get("/test", tags=[Tags.state],
+            summary="Test endpoint",
+            description="Returns a test message to verify the service is running.")
+async def test():
+    try:
+        await techAI.test_pipeline(mode=techAI.Pipeline.TEST)
+
+    except Exception as e:
+        log_main.error(f"Error fetching news: {e}")
+        return {"error": str(e)}
 
 
 # ------ GITHUB USER ENDPOINTS ------

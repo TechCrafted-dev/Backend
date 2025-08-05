@@ -7,6 +7,7 @@ from enum   import Enum, auto
 from dateutil.parser import isoparse
 from datetime import datetime, timedelta
 
+from modules import database
 from modules.config import log_techAI, settings
 
 from openai import AsyncOpenAI, RateLimitError
@@ -65,7 +66,7 @@ def build_kwargs(*, config: str, system: str, user: str):
 
     # TOKENS
     if caps.get("max_output_tokens"):
-        kwargs["max_output_tokens"] = str(MAX_TOKENS)
+        kwargs["max_output_tokens"] = MAX_TOKENS
 
     # BUSCADOR
     if caps.get("search"):
@@ -488,6 +489,49 @@ async def tool_redactor(news: list) -> list:
     return final_news
 
 
+async def source_news() -> list:
+    log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
+
+    sources = database.get_news_source_by_score(0, "greater")
+    vetoed = database.get_news_source_by_score(0, "less")
+
+    sys = (
+        "Eres un asistente que busca y proporciona enlaces de fuentes de noticias de programación.\n"
+        "Asegurate de que las URLs son relevantes y actualizadas.\n"
+
+        "Siempre devuelve una lista de enlaces en formato JSON con la siguiente estructura:\n"
+        "{'news_sources': ['url1', 'url2', ...]}\n\n"
+        
+        "URLs almacenadas:\n"
+    )
+
+    sys += "\n".join(f"- {source}" for source in sources)
+    sys += "\nURLs vetadas:\n"
+    sys += "\n".join(f"- {source}" for source in vetoed)
+
+    user = (
+        "Proporciona una lista de fuentes de noticias relacionadas con la programación.\n"
+        "No repitas las URLs ya almacenadas ni las vetadas."
+    )
+
+
+    response = await _response(build_kwargs(config="search", system=sys, user=user))
+    data = None
+    for entry in response.output:
+        if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+            for chunk in entry.content:
+                if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                    data = chunk.text
+
+    sources = extract_json(data)
+    return sources.get('news_sources', [])
+
+
+async def source_rss() -> list:
+    pass
+
+
+
 # ---------- PIPELINES ----------
 class Pipeline(Enum):
     TEST = auto()         # Para pruebas
@@ -500,8 +544,8 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
 
     if mode is Pipeline.TEST:
-        log_techAI.info("Modo de prueba activado.")
-        return "Pipeline de prueba ejecutado correctamente."
+        source = await source_news()
+        log_techAI.info(f"Fuentes de noticias:\n{source}")
 
     if mode is Pipeline.EVAL:
         last_date = isoparse(data['updated_at'])
@@ -529,6 +573,19 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
         return redactor
 
     return None
+
+# ---------- TEST ----------
+async def test_pipeline(mode: Pipeline) -> list:
+    log_techAI.info("Ejecutando el pipeline de prueba...")
+
+    try:
+        response = await run_pipeline({}, mode)
+        log_techAI.info("Pipeline de prueba completado con éxito.")
+
+    except Exception as e:
+        log_techAI.error("Error en el pipeline de prueba: %s", e)
+        raise
+
 
 
 # ---------- GENERATE POST ----------
