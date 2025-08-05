@@ -29,11 +29,12 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         search_news,
         'cron',
-        hour=6,
+        day_of_week='sun'
+        hour=0,
         minute=0,
         id='search_news_job',
         replace_existing=True,
-        misfire_grace_time=300)
+        misfire_grace_time=600)
 
     scheduler.add_job(
         update_repos,
@@ -48,10 +49,10 @@ async def lifespan(app: FastAPI):
         'cron',
         day_of_week='wed',
         hour=0,
-        minute=0,
+        minute=30,
         id='update_all_posts_job',
         replace_existing=True,
-        misfire_grace_time=300
+        misfire_grace_time=600
     )
 
     scheduler.start()
