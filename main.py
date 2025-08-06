@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         search_news,
         'cron',
-        day_of_week='sun'
+        day_of_week='sun',
         hour=0,
         minute=0,
         id='search_news_job',
