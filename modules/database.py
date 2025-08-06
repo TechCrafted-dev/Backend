@@ -49,6 +49,7 @@ class News(Base):
 class NewsSource(Base):
     __tablename__ = 'news_source'
     id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la fuente de noticias
+    name = Column(String, nullable=False, unique=True)           # Nome de la fuente de noticias
     url = Column(String, nullable=False)                         # URL de la fuente de noticias
     rss = Column(String, nullable=False)                         # URL del RSS de la fuente
     added_at = Column(DateTime, nullable=False)                  # Fecha de adición de la fuente

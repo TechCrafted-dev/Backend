@@ -498,6 +498,7 @@ async def source_news() -> list:
     sys = (
         "Eres un asistente que busca y proporciona enlaces de fuentes de noticias de programación.\n"
         "Asegurate de que las URLs son relevantes y actualizadas.\n"
+        "Las fuentes pueden ser de cualquier ubicación"
 
         "Siempre devuelve una lista de enlaces en formato JSON con la siguiente estructura:\n"
         "{'news_sources': ['url1', 'url2', ...]}\n\n"
@@ -510,7 +511,7 @@ async def source_news() -> list:
     sys += "\n".join(f"- {source}" for source in vetoed)
 
     user = (
-        "Proporciona una lista de fuentes de noticias relacionadas con la programación.\n"
+        "Proporciona una lista de 10 fuentes de noticias relacionadas con la programación.\n"
         "No repitas las URLs ya almacenadas ni las vetadas."
     )
 
@@ -527,9 +528,44 @@ async def source_news() -> list:
     return sources.get('news_sources', [])
 
 
-async def source_rss() -> list:
-    pass
+async def source_rss(sources: list) -> dict:
+    log_techAI.info(f"Obteniendo RSS de {len(sources)} fuentes:")
 
+    model = {
+        "Nombre de la fuente": {
+        "url": "URL de la fuente",
+        "rss": "URL del rss de la fuente"
+        }
+    }
+
+    sys = (
+        "Eres un asistente clasificador de noticias.\n"
+        "Se te proporcionarán instrucciones y una lista de fuentes\n"
+        "Debes clasificarla con la siguiente estructura:\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
+        
+        "\nSi no se localiza RSS rellenar el campo **rss** con None"
+    )
+
+    user = (
+        "Necesito que hagas Web Scraping al HEAD y extraigas el link RSS de las siguientes fuentes de noticias:\n"
+    )
+
+    for source in sources:
+        user += f"- {source}\n"
+
+    user += "\nSi tienes varios links, la que necesitamos es la relacionada con noticias de programación"
+
+    response = await _response(build_kwargs(config="search", system=sys, user=user))
+    data = None
+    for entry in response.output:
+        if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+            for chunk in entry.content:
+                if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                    data = chunk.text
+
+    sources = extract_json(data)
+    return sources
 
 
 # ---------- PIPELINES ----------
@@ -545,7 +581,8 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
 
     if mode is Pipeline.TEST:
         source = await source_news()
-        log_techAI.info(f"Fuentes de noticias:\n{source}")
+        validate = await source_rss(source)
+        log_techAI.info(f"Fuentes de noticias:\n{json.dumps(validate, ensure_ascii=False, indent=2)}")
 
     if mode is Pipeline.EVAL:
         last_date = isoparse(data['updated_at'])
