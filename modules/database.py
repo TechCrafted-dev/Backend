@@ -239,7 +239,7 @@ def save_news_source(new_source: NewsSource):
     with SessionLocal() as session:
         session.add(new_source)
         session.commit()
-        log_database.info(f"Fuente de noticias {new_source.url} guardada exitosamente.")
+        log_database.info(f"Fuente de noticias {new_source.name} guardada exitosamente.")
 
 def get_news_sources():
     with SessionLocal() as session:
@@ -263,7 +263,7 @@ def get_news_source_by_id(source_id: int):
             log_database.warning(f"Fuente de noticias con ID {source_id} no encontrada.")
             return None
 
-def get_id_by_news_source(url: str):
+def get_id_by_source(url: str):
     with SessionLocal() as session:
         source = session.query(NewsSource).filter(NewsSource.url == url).first()
         if source:
@@ -274,26 +274,28 @@ def get_id_by_news_source(url: str):
             log_database.warning(f"Fuente de noticias con URL {url} no encontrada.")
             return None
 
-def update_news_source_by_id(source_id: int, updated_source: NewsSource):
+def update_news_source_by_id(updated_source: NewsSource):
     with SessionLocal() as session:
-        existing_source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
+        existing_source = session.query(NewsSource).filter(NewsSource.id == updated_source.id).first()
         if existing_source:
             existing_source.url = updated_source.url
             existing_source.rss = updated_source.rss
             existing_source.added_at = updated_source.added_at
             existing_source.score = updated_source.score
             session.commit()
-            log_database.info(f"Fuente de noticias con ID {source_id} actualizada exitosamente.")
+            log_database.info(f"Fuente de noticias con ID {updated_source.id} actualizada exitosamente.")
 
         else:
-            log_database.warning(f"Fuente de noticias con ID {source_id} no encontrada para actualizar.")
+            log_database.warning(f"Fuente de noticias con ID {updated_source.id} no encontrada para actualizar.")
 
-def get_news_source_by_score(score: int, comparison: str = "greater"):
+def get_news_sources_by_score(score: int, comparison: str = "greater"):
     with SessionLocal() as session:
         if comparison == "greater":
-            sources = session.query(NewsSource).filter(NewsSource.score > score).all()
+            sources = session.query(NewsSource).filter(NewsSource.score >= score).all()
+
         elif comparison == "less":
-            sources = session.query(NewsSource).filter(NewsSource.score < score).all()
+            sources = session.query(NewsSource).filter(NewsSource.score <= score).all()
+
         else:
             log_database.warning("Comparación inválida. Use 'greater' o 'less'.")
             return []
@@ -301,6 +303,7 @@ def get_news_source_by_score(score: int, comparison: str = "greater"):
         if sources:
             log_database.info(f"{len(sources)} fuentes de noticias recuperadas exitosamente con score {comparison} a {score}.")
             return sources
+
         else:
             log_database.warning(f"No se encontraron fuentes de noticias con score {comparison} a {score}.")
             return []
