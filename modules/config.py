@@ -90,6 +90,11 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": False,
         },
+        "httpx": {                      # Logger para httpx
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
         "main": {                       # Logger principal de tu aplicación
             "handlers": ["console"],
             "level": "INFO",
