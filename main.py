@@ -130,12 +130,7 @@ async def health():
             summary="Test endpoint",
             description="Returns a test message to verify the service is running.")
 async def test():
-    try:
-        await techAI.test_pipeline(mode=techAI.Pipeline.TEST)
-
-    except Exception as e:
-        log_main.error(f"Error fetching news: {e}")
-        return {"error": str(e)}
+    await techAI.test_pipeline(mode=techAI.Pipeline.TEST)
 
 
 # ------ GITHUB USER ENDPOINTS ------

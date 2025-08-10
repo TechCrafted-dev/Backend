@@ -1,10 +1,14 @@
 import re
 import json
+import time
 import httpx
+import asyncio
 import requests
 
-from typing import Any
+from pathlib import Path
 from enum   import Enum, auto
+from typing import Any, Dict, Iterable
+
 from dateutil.parser import isoparse
 from datetime import datetime, timedelta
 
@@ -15,6 +19,7 @@ from modules.config import log_techAI, settings
 
 from openai import AsyncOpenAI, RateLimitError
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
 
 API_KEY = settings['OPENAI']['API-KEY']
 
@@ -31,7 +36,7 @@ CAPABILITIES = {
 
 
 # ---------- UTILS ----------
-def extract_json(text: str) -> dict | Any:
+def _extract_json(text: str) -> dict | Any:
     match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
 
     try:
@@ -89,6 +94,26 @@ def build_kwargs(*, config: str, system: str, user: str):
     return kwargs
 
 
+def build_batch_lines(*, config: str, system: str, prompts: Iterable[str]):
+    """
+    Genera cada línea JSONL usando build_kwargs para mantener paridad con _response.
+    """
+    for i, up in enumerate(prompts, start=1):
+        body = build_kwargs(config=config, system=system, user=up)  # reutiliza tu constructor
+        yield {
+            "custom_id": f"req-{i}",
+            "method": "POST",
+            "url": "/v1/responses",
+            "body": body,  # incluye model, input, tools/reasoning, etc.
+        }
+
+def write_jsonl(path: str, lines: Iterable[dict]) -> Path:
+    p = Path(path)
+    with p.open("w", encoding="utf-8") as f:
+        for obj in lines:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    return p
+
 # ---------- HELPERS ----------
 async def _chat(system: str, user: str) -> str:
     try:
@@ -120,6 +145,78 @@ async def _response(payload: dict):
     except Exception as e:
         log_techAI.error("Error durante la ejecución de responses: %s", e)
         raise
+
+
+async def _batch(
+    system: str,
+    user_prompts: Iterable[str],
+    *,
+    config: str = "search",            # usa tu CAPABILITIES["search"] (o "reasoner" si quieres)
+    jsonl_path: str = "requests.jsonl",
+    poll_interval: float = 5.0,
+    max_wait_seconds: float = 1800.0,
+) -> Dict[str, Any]:
+    # 1) JSONL con build_kwargs (paridad con _response)
+    lines = build_batch_lines(config=config, system=system, prompts=user_prompts)
+    p = write_jsonl(jsonl_path, lines)
+
+    # 2) Subir archivo + crear batch (igual que ya tienes)
+    in_file = await aclient.files.create(file=p, purpose="batch")
+    batch = await aclient.batches.create(
+        input_file_id=in_file.id,
+        endpoint="/v1/responses",
+        completion_window="24h"
+    )
+
+    # 3) Polling (igual)
+    t0 = time.time()
+    terminal = {"completed", "failed", "cancelled", "cancelling", "expired", "finalizing"}
+    while True:
+        batch = await aclient.batches.retrieve(batch.id)
+        if batch.status in terminal:
+            break
+        if time.time() - t0 > max_wait_seconds:
+            raise TimeoutError(f"Batch {batch.id} sin finalizar tras {max_wait_seconds}s (estado actual: {batch.status}).")
+        await asyncio.sleep(poll_interval)
+
+    if batch.status != "completed":
+        return {"ok": False, "status": batch.status, "batch": batch.model_dump()}
+
+    # 4) Descargar y parsear (igual que ya tienes)
+    resp = await aclient.files.content(batch.output_file_id)
+    raw_bytes_list = [chunk async for chunk in resp.aiter_bytes()]
+    raw_bytes = b"".join(raw_bytes_list)
+    lines = raw_bytes.decode("utf-8").splitlines()
+
+    results: Dict[str, Any] = {}
+    for line in lines:
+        obj = json.loads(line)
+        cid = obj.get("custom_id")
+        r = obj.get("response")
+        if r and 200 <= r.get("status_code", 0) < 300:
+            body = r.get("body", {})
+            text = body.get("output_text")
+            if text is None:
+                text_parts = []
+                for item in body.get("output", []):
+                    for c in item.get("content", []):
+                        if c.get("type") in ("output_text", "text"):
+                            text_parts.append(c.get("text", ""))
+                text = "".join(text_parts) if text_parts else ""
+            results[cid] = {"ok": True, "text": text, "raw": body}
+        else:
+            results[cid] = {"ok": False, "error": obj.get("error") or r}
+
+    return results
+
+
+async def _batch_texts(system: str, user_prompts: Iterable[str], *, config: str = "search") -> list[str | None]:
+    results = await _batch(system, user_prompts, config=config)
+    out = []
+    for i, _ in enumerate(user_prompts, start=1):
+        item = results.get(f"req-{i}")
+        out.append(item["text"] if item and item.get("ok") else None)
+    return out
 
 
 # ---------- TOOLS ----------
@@ -284,15 +381,16 @@ async def tool_source_news() -> list:
         " - https://www.noticias.dev"
     )
     user = "Proporciona una lista de fuentes de noticias relacionadas con la programación."
+
     response = await _response(build_kwargs(config="find", system=sys, user=user))
+    data = None
+    for entry in response.output:
+        if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+            for chunk in entry.content:
+                if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                    data = chunk.text
 
-    msg = next(
-        item for item in response.output
-        if item.type == "message"
-    )
-
-    sources = msg.content[0].text
-    sources = extract_json(sources)
+    sources = _extract_json(data)
     return sources.get('sources', [])
 
 
@@ -352,7 +450,7 @@ async def tool_get_news(sources: list) -> dict:
                             content = chunk.text
 
             log_techAI.info(content)
-            content = extract_json(content)
+            content = _extract_json(content)
 
         except Exception as e:
             log_techAI.error("Error obteniendo noticias de %s: %s", source, e)
@@ -415,12 +513,14 @@ async def tool_cleanup_news(news_sources: dict) -> list:
 
         try:
             response = await _response(build_kwargs(config="reasoner", system=sys, user=user))
-            msg = next(
-                item for item in response.output
-                if item.type == "message"
-            )
-            data = extract_json(msg.content[0].text)
-            clear_news.extend(data)
+            data = None
+            for entry in response.output:
+                if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                    for chunk in entry.content:
+                        if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                            data = chunk.text
+
+            clear_news.extend(_extract_json(data))
 
         except Exception as e:
             log_techAI.error("Error limpiando noticias: %s", e)
@@ -490,72 +590,67 @@ async def tool_redactor(news: list) -> list:
     return final_news
 
 
-async def source_news():
+async def source_news(sources):
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
-    sources = database.get_news_sources_by_score(0, "greater")
-    if len(sources) >= 10:
-        return True
-
-    vetoed = database.get_news_sources_by_score(-1, "less")
+    sources = database.get_news_sources_by_score(0, "greater")  # ya almacenadas
+    #vetoed = database.get_vetoed_sources()  # vetadas (si aplica)
 
     model = """
     {
       "news_sources": [
-        {
-          "url1": "https://example.com/rss.xml",
-          "url2": "https://example.org/feed.atom"
-        }
+        "https://example.com/feed.xml",
+        "https://example.org/atom.xml"
       ]
     }"""
 
     sys = (
-        "Eres un asistente experto en programación y seguridad informática. "
-        "Tu tarea es encontrar y devolver **únicamente URLs de feeds RSS o Atom** "
-        "con noticias de programación RELEVANTES y ACTUALIZADAS.\n\n"
+        "Eres un buscador de *feeds* RSS/Atom sobre programación.\n"
+        "Tu objetivo es devolver **únicamente URLs de feeds** (no páginas home) "
+        "que publiquen novedades técnicas relevantes.\n\n"
 
-        "## Requisitos del resultado\n"
-        "• Responde **SOLO** con JSON válido, sin texto adicional, "
-        "y siguiendo exactamente la estructura:\n"
+        "## Respuesta\n"
+        "Devuelve **SOLO** JSON válido exactamente con la forma:\n"
         f"{model}\n\n"
 
-        "## Criterios de calidad para aceptar una fuente\n"
-        "1. Debe ser un feed RSS/Atom accesible (HTTP 200) y bien formado.\n"
-        "2. Debe publicar changelogs, lanzamientos, vulnerabilidades o artículos técnicos "
-        "directamente relacionados con lenguajes (Python, Java, JavaScript, TypeScript, Go, Rust, Kotlin, etc.), "
-        "frameworks (React, Spring, Angular, Django, …) o herramientas de desarrollo (CI/CD, linters, etc.).\n"
-        "3. Da prioridad a **blogs oficiales** del lenguaje o proyecto, "
-        "avances en estándares (IETF, W3C) y listas de correo convertidas a RSS.\n"
-        "4. Acepta también blogs de seguridad o laboratorios de proveedores "
-        "que publiquen CVE y parches relevantes para desarrolladores.\n\n"
+        "## Qué considerar como fuente válida\n"
+        "• Feeds oficiales de lenguajes (Python, Java, JavaScript, TypeScript, Go, Rust, Kotlin, etc.).\n"
+        "• Frameworks y runtimes (React, Angular, Vue, Svelte, Next.js, Spring, Django, FastAPI, Node.js, Deno, Bun, etc.).\n"
+        "• Tooling de desarrollo (Vite, Webpack, Babel, SWC, esbuild, VS Code, JetBrains, Git, GitHub/GitLab changelogs).\n"
+        "• Seguridad relevante para devs (OpenSSL, OpenSSH, RustSec, Node security, etc.).\n\n"
 
-        "## Filtros de exclusión (descarta si se cumple CUALQUIERA)\n"
-        "• Agregadores genéricos (Medium, Reddit, Hacker News, Dev.to, Substack personal, etc...).\n"
-        "• Blogs puramente comerciales o de marketing, notas de prensa, patrocinios, webinars.\n"
-        "• Anuncios de empleo, eventos, meetups, conferencias.\n"
-        "• Feeds que ya estén listados en «URLs almacenadas» o «URLs vetadas» (véase abajo).\n"
-        "• Duplicados exactos o variantes http/https, con o sin www.\n\n"
+        "## Exclusiones (descarta si se cumple CUALQUIERA)\n"
+        "• Agregadores genéricos: Medium, Reddit, Hacker News, Dev.to, Substack personal.\n"
+        "• Marketing, notas de prensa, ofertas de empleo, eventos, webinars.\n"
+        "• Homes sin feed; solo URLs de RSS/Atom (terminan en .xml, .rss, .atom o rutas /feed, /rss.xml, /atom.xml).\n\n"
 
-        "## Formato estricto\n"
-        "• Usa siempre HTTPS si está disponible.\n"
-        "• No incluyas más de un feed por dominio a menos que cubra proyectos distintos "
-        "y claramente diferenciados.\n\n"
+        "## Diversidad y deduplicación\n"
+        "• Máximo **1 feed por dominio** salvo proyectos claramente diferentes (p.ej., nodejs.org y npmjs.com).\n"
+        "• Prioriza dominios y proyectos **no presentes** en la lista ya almacenada.\n"
+        "• No repitas la misma URL con variantes http/https o con/sin www (normaliza mentalmente a https y sin www).\n"
+        "• Intenta equilibrar la propuesta en 4 categorías: Lenguajes, Frameworks, Tooling, Seguridad.\n\n"
 
-        "### URLs almacenadas que NO debes incluir nuevamente:\n"
+        "## No inventes\n"
+        "• Si no estás seguro de que una URL es un **feed**, no la incluyas.\n"
+        "• Si no llegas a la cantidad solicitada, devuelve menos sin rellenar con ruido.\n\n"
+
+        "### URLs ya almacenadas (no incluir):\n"
     )
 
-    # Añade las listas dinámicas de `sources` y `vetoed`:
-    sys += "\n".join(f"- {source.url}" for source in sources)
-    sys += "\n".join(f"- {source.url}" for source in vetoed)
+    sys += "\n".join(f"- {s.url}" for s in sources)
+    # sys += "\n\n### URLs vetadas (no incluir):\n"
+    # sys += "\n".join(f"- {v.url}" for v in vetoed)
+
     sys += (
-        "\n\n"
-        "### Recordatorio final\n"
+        "\n\n### Recordatorio final\n"
         "• Devuelve **exclusivamente** el JSON pedido.\n"
-        "• No incluyas comentarios, explicaciones ni código adicional.\n"
+        "• No añadas comentarios, explicaciones ni código adicional.\n"
     )
 
     user = (
-        "Proporciona una lista de fuentes de noticias relacionadas con la programación.\n"
+        "Proporciona entre 20 y 30 **feeds RSS/Atom** de programación aún no almacenados. "
+        "Equilibra entre Lenguajes, Frameworks, Tooling y Seguridad. "
+        "Solo endpoints de feed (no páginas home)."
     )
 
     response = await _response(build_kwargs(config="find", system=sys, user=user))
@@ -566,12 +661,12 @@ async def source_news():
                 if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
                     data = chunk.text
 
-    sources = extract_json(data)
-    return False, sources.get('news_sources', [])
+    sources = _extract_json(data)
+    return sources.get('news_sources', [])
 
 
 async def source_rss(sources: list) -> dict:
-    log_techAI.info(f"Obteniendo RSS de {len(sources[0])} fuentes:")
+    log_techAI.info(f"Normalizando RSS de {len(sources[0])} fuentes:")
 
     model = {
         "Nombre de la fuente": {
@@ -581,28 +676,40 @@ async def source_rss(sources: list) -> dict:
     }
 
     sys = (
-        "Eres un extractor de metadatos RSS.\n\n"
-        
-        "Para **cada feed** que te entregue el usuario:\n"
-        "1. Descarga el feed (HTTP 200 obligatorio). Si falla, pon \"rss\": \"None\".\n"
-        "2. Obtén el <title> del canal o, si falta, el <title> de la página HTML.\n"
-        "   Usa ese texto —sin las palabras 'RSS', 'Feed' ni 'Atom'— como nombre legible.\n"
-        "3. Deriva la URL de la home quitando la ruta del feed.\n"
-        "4. Devuelve un único objeto JSON con el siguiente formato.\n"
-        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
+        "Eres un extractor y normalizador de metadatos RSS/Atom para fuentes de programación.\n\n"
 
-        "Reglas extra:\n"
-        "• Fuerza HTTPS siempre que exista.\n"
-        "• No devuelvas dominios duplicados ni los listados en «URLs almacenadas»/«vetadas».\n"
-        "• No añadas ningún texto fuera del JSON."
+        "Para **cada feed** dado por el usuario:\n"
+        "1) DESCARGA Y VALIDA\n"
+        "   • Realiza GET con seguimiento de redirecciones (máx. 5). HTTP 200 obligatorio.\n"
+        "   • Acepta Content-Type: application/rss+xml, application/atom+xml, application/xml o text/xml.\n"
+        "   • Si el contenido NO es XML (es HTML), intenta autodiscovery en esa página buscando\n"
+        "     <link rel=\"alternate\" type=\"application/rss+xml|application/atom+xml\"> y reintenta con ese href.\n"
+        "   • Si tras esto no hay feed válido, NO incluyas la fuente o, si debes conservarla, usa \"rss\":\"None\".\n"
+        "\n"
+        "2) NOMBRE LEGIBLE\n"
+        "   • Preferencia: título del canal RSS (<channel><title>) o del feed Atom (<feed><title>).\n"
+        "   • Fallback: <title> de la página HTML o meta og:site_name.\n"
+        "   • Limpia sufijos genéricos: 'RSS', 'Feed', 'Atom', 'Blog', separadores ('|', '—', '-').\n"
+        "   • Mantén el nombre **oficial** (no traduzcas), sin emojis ni mayúsculas raras; normaliza espacios.\n"
+        "\n"
+        "3) URL CANÓNICA DEL SITIO\n"
+        "   • Preferencia: <channel><link> (RSS) o <link rel=\"alternate\" type=\"text/html\"> (Atom).\n"
+        "   • Fallback: deriva desde la URL del feed (origen + ruta base del proyecto), NO simplemente la raíz del dominio si el feed es de un subproyecto.\n"
+        "   • Normaliza: usa HTTPS si existe, elimina fragmentos y query tracking, host en minúsculas, quita 'www.' si el sitio responde igual.\n"
+        "\n"
+        "4) DEDUPE Y SANEAMIENTO\n"
+        "   • No devuelvas dominios ya presentes en «URLs almacenadas»/«vetadas».\n"
+        "   • Considera equivalentes http/https y con/sin www; trata 'blog.' y dominio raíz como duplicados salvo que representen proyectos distintos.\n"
+        "   • Si dos feeds generan el mismo nombre, desambiguar añadiendo ' (proyecto)' o el dominio entre paréntesis.\n"
+        "\n"
+        "5) SALIDA\n"
+        "   • Devuelve un ÚNICO objeto JSON exactamente con el formato siguiente:\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n"
+        "   • Incluye solo fuentes validadas; si una falla de forma temporal y quieres conservarla, usa \"rss\":\"None\".\n"
+        "   • No añadas ningún texto fuera del JSON."
     )
 
-    user = (
-        "Extrae metadatos de estas URLs de feed:\n"
-    )
-
-    for source in sources:
-        user += f"- {source}\n"
+    user = "Extrae y normaliza metadatos de estas URLs de feed:\n" + "".join(f"- {src}\n" for src in sources)
 
     response = await _response(build_kwargs(config="find", system=sys, user=user))
     data = None
@@ -612,96 +719,50 @@ async def source_rss(sources: list) -> dict:
                 if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
                     data = chunk.text
 
-    sources = extract_json(data)
+    sources = _extract_json(data)
+
+    return sources
+
+
+async def validate_rss(sources: dict):
+    log_techAI.info("Validando RSS...")
 
     for source, data in sources.items():
         try:
-            score = 1 if data['rss'] != "None" else -1
-
-            new_source = database.NewsSource(
-                name=source,
-                url=data['url'],
-                rss=data['rss'],
-                added_at=datetime.now(),
-                score=score
-            )
-
-            database.save_news_source(new_source)
-
-        except IntegrityError as e:
-            log_techAI.warning("Fuente ya almacenada: %s", source)
+            resp = requests.get(data['rss'], timeout=10)
 
         except Exception as e:
-            log_techAI.info("Error al guardar la fuente: %s", e)
-            raise e
+            continue
 
-    return database.get_news_sources_by_score(0, "greater")
-
-
-async def validate_rss(sources: list):
-    log_techAI.info("Validando RSS...")
-
-    sys = (
-        "Eres un agente analista que evalúa fuentes RSS de noticias de programación.\n"
-        "Tu objetivo es determinar si cada fuente es válida para su consumo.\n\n"
-        f"Hoy es: {datetime.now().strftime('%d de %B del %Y')}.\n\n"
-        "REGLAS\n"
-        "1. Solo analiza las noticias publicadas en los últimos 7 días.\n"
-        "2. Evalúa cada fuente en función de:\n"
-        "   · Cantidad de noticias de programación publicadas en ese período.\n"
-        "   · Calidad/relevancia de dichas noticias para desarrolladores.\n"
-        "3. Asigna una puntuación única, sin texto adicional:\n"
-        "   · 1.0  → Muy útil (muchas noticias de alta calidad).\n"
-        "   · 0.0  → Muy poco útil (escasas o irrelevantes).\n"
-        "   · -1   → No hay noticias recientes o no son de programación.\n"
-        "   (Puedes usar valores intermedios con un decimal.)\n"
-        "4. Responde **únicamente** con la puntuación numérica.\n"
-    )
-
-    for source in sources:
-        try:
-            resp = requests.get(source.rss, timeout=10)
-
-        except Exception as e:
-            resp = requests.Response()
-            resp.status_code = 500
-
-        if resp.status_code != 200:
-            log_techAI.info("Fuente %s no disponible", source.name)
-            source.rss = "None"
-            source.score = -1
-
-        else:
-            user = source.rss
-
-            response = await _response(build_kwargs(config="find", system=sys, user=user))
-
-            score = None
-            for entry in response.output:
-                if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
-                    for chunk in entry.content:
-                        if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
-                            score = chunk.text
+        if resp.status_code == 200:
+            log_techAI.info("Fuente %s disponible", source)
 
             try:
-                source.score = float(score)
-                log_techAI.info(f"EL LLM a puntuado la fuente {source.name} con un {score}" )
+                new_source = database.NewsSource(
+                    name=source,
+                    url=data['url'],
+                    rss=data['rss'],
+                    added_at=datetime.now(),
+                    score=1
+                )
+
+                database.save_news_source(new_source)
+
+            except IntegrityError as e:
+                log_techAI.warning("Fuente ya almacenada: %s", source)
 
             except Exception as e:
-                log_techAI.warning("Respuesta del LLM errónea para la fuente: %s\nscore", score)
-                continue
-
-        database.update_news_source_by_id(source)
+                log_techAI.info("Error al guardar la fuente: %s", e)
+                raise e
 
 
-async def extract_news():
-    sources = database.get_news_sources_by_score(0, "greater")
+async def extract_news(sources):
     log_techAI.info(f"Extrayendo noticias de {len(sources)} fuentes...")
 
     today = datetime.now()
     seven_day = today - timedelta(days=7)
 
-    modelo = {
+    model = {
         "title": "Título de la noticia en español",
         "url": "URL de la noticia",
         "date": "YYYY-MM-DD"
@@ -724,23 +785,22 @@ async def extract_news():
 
         "FORMATO DE RESPUESTA\n"
         "• Devuelve ÚNICAMENTE una lista JSON (sin texto adicional) con la forma exacta del modelo siguiente.\n"
-        f"{json.dumps(modelo, ensure_ascii=False, indent=2)}\n\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
         "• Si no hay noticias válidas, responde una lista vacia: []\n"
     )
 
-    news = []
+    news_week = []
     count = 1
     for source in sources:
-        log_techAI.info(f"{count}: {source.name}")
-        count += 1
-
         user = (
             "Recopila noticias de programación de los últimos 7 días.\n"
             f"Fuente RSS: {source.rss}\n"
         )
 
-        response = await _response(build_kwargs(config="search", system=sys, user=user))
+        log_techAI.info(f"({count}/{len(sources)}) {source.name}")
+        count += 1
 
+        response = await _response(build_kwargs(config="search", system=sys, user=user))
         data = None
         for entry in response.output:
             if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
@@ -748,42 +808,100 @@ async def extract_news():
                     if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
                         data = chunk.text
 
-        log_techAI.info("Respuesta del LLM:\n%s", data)
-        news_source = extract_json(data)
 
-        if len(news_source) == 0:
-            source.score -= 0.1
-            database.update_news_source_by_id(source)
+        resources = _extract_json(data)
+        if len(resources) != 0:
+            log_techAI.info("Respuesta:\n%s", resources)
+            resources[0]["source"] = {
+                "name": source.name,
+                "url": source.url,
+                "rss": source.rss,
+            }
 
-        else:
-            if source.score < 1:
-                source.score += 0.2
-                database.update_news_source_by_id(source)
+            news_week.extend(resources)
 
-            news.extend(news_source)
+    log_techAI.info("Respuesta:\n%s", news_week)
+    return news_week
 
-    return news
+
+async def gen_news(news_week):
+    log_techAI.info(f"Generando publicaciones de {len(news_week)} noticias.")
+
+    model = {
+        "sumary": {
+            "introduction": "Entradilla",
+            "content": "Contenido"
+        }
+    }
+
+    sys = (
+        "Eres un redactor técnico especializado. "
+        "Debes acceder a la URL, leer la fuente original y generar un post compuesto por dos partes:\n"
+        " • Entradilla: un párrafo breve y atractivo que resuma el anuncio.\n"
+        " • Contenido: desarrollo con contexto, detalles, cambios clave y por qué importa.\n\n"
+        
+        "Reglas de calidad:\n"
+        " • Nada de inventar, todo debe venir de la fuente o de páginas oficiales enlazadas desde ella.\n"
+        " • Siempre visita la URL dada. Si la página no carga, omite el artículo.\n"
+        " • Citas textuales, si las usas, máximo 20 palabras por cita.\n"
+        " • Estilo claro, conciso, neutral, ligeramente divulgativo.\n"
+        " • Entradilla: 45–80 palabras.\n"
+        " • Contenido ampliado: 300–600 palabras, con subtítulos si aporta claridad.\n"
+        " • No añadas opiniones, sólo contexto comprobable.\n\n"
+
+        "Método de salida:\n"
+        " • Debe ser **únicamente** en formato JSON.\n"
+        " • No agreges comentarios y texto adicional.\n"
+        " • Usa la siguiente estructura:\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+    posts_news = []
+    for news in news_week:
+        user = (
+            "Genera un post de la siguiente url dada:\n"
+        )
+
+        user += f"{news.url}\n"
+
+        response = await _response(build_kwargs(config="search", system=sys, user=user))
+        data = None
+        for entry in response.output:
+            if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                for chunk in entry.content:
+                    if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                        data = chunk.text
+
+        summary = _extract_json(data)
+        log_techAI.info("Respuesta:\n%s", summary)
+        news["sumary"] = summary[0]["sumary"]
+        posts_news.append(news)
+
+    return posts_news
 
 
 # ---------- PIPELINES ----------
 class Pipeline(Enum):
-    TEST = auto()         # Para pruebas
-    EVAL = auto()         # Para comprobar si ha cambiado
-    POST = auto()         # Para generar posts
-    NEWS = auto()         # Para obtener noticias
+    TEST = auto()     # Para pruebas
+    EVAL = auto()     # Para comprobar si ha cambiado
+    POST = auto()     # Para generar posts
+    NEWS = auto()     # Para obtener noticias
 
 
-async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
+async def _run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
 
     if mode is Pipeline.TEST:
-        many, source = await source_news()
-        if not many:
-            source = await source_rss(source)
-            await validate_rss(source)
+        sources = database.get_news_sources_by_score(0, "greater")
+        if  len(sources) < 50:
+            find_sources = await source_news(sources)
+            get_rss = await source_rss(find_sources)
+            await validate_rss(get_rss)
 
-        news = await extract_news()
-        log_techAI.info("listado de news:\n%s", news)
+        news_week = await extract_news(sources)
+        posts_news = await gen_news(news_week)
+        log_techAI.info("listado de news:\n%s", posts_news)
 
     if mode is Pipeline.EVAL:
         last_date = isoparse(data['updated_at'])
@@ -816,7 +934,7 @@ async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
 async def test_pipeline(mode: Pipeline) -> list:
     log_techAI.info("Ejecutando el pipeline de prueba...")
 
-    response = await run_pipeline({}, mode)
+    response = await _run_pipeline({}, mode)
     log_techAI.info("Pipeline de prueba completado con éxito.")
 
 
@@ -826,7 +944,7 @@ async def gen_post(data, mode: Pipeline) -> str:
 
     try:
         data = data if isinstance(data, dict) else json.loads(data)
-        response = await run_pipeline(data, mode)
+        response = await _run_pipeline(data, mode)
 
         if response is None:
             log_techAI.info("Post generado con éxito.")
@@ -841,7 +959,7 @@ async def gen_post(data, mode: Pipeline) -> str:
 # ---------- GET NEWS ----------
 async def get_news(mode: Pipeline) -> list:
     try:
-        response = await run_pipeline({}, mode)
+        response = await _run_pipeline({}, mode)
         log_techAI.info(response)
         return response
 
