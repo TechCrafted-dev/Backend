@@ -593,64 +593,64 @@ async def tool_redactor(news: list) -> list:
 async def source_news(sources):
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
-    sources = database.get_news_sources_by_score(0, "greater")  # ya almacenadas
-    #vetoed = database.get_vetoed_sources()  # vetadas (si aplica)
-
     model = """
     {
       "news_sources": [
-        "https://example.com/feed.xml",
-        "https://example.org/atom.xml"
+        {
+          "url1": "https://example.com/rss.xml",
+          "url2": "https://example.org/feed.atom"
+        }
       ]
     }"""
 
     sys = (
-        "Eres un buscador de *feeds* RSS/Atom sobre programación.\n"
-        "Tu objetivo es devolver **únicamente URLs de feeds** (no páginas home) "
-        "que publiquen novedades técnicas relevantes.\n\n"
+        "Eres un asistente experto en programación y seguridad informática. "
+        "Tu tarea es encontrar y devolver **únicamente URLs de feeds RSS o Atom** "
+        "con noticias de programación RELEVANTES y ACTUALIZADAS.\n\n"
 
-        "## Respuesta\n"
-        "Devuelve **SOLO** JSON válido exactamente con la forma:\n"
+        "## Requisitos del resultado\n"
+        "• Responde **SOLO** con JSON válido, sin texto adicional, "
+        "y siguiendo exactamente la estructura:\n"
         f"{model}\n\n"
 
-        "## Qué considerar como fuente válida\n"
-        "• Feeds oficiales de lenguajes (Python, Java, JavaScript, TypeScript, Go, Rust, Kotlin, etc.).\n"
-        "• Frameworks y runtimes (React, Angular, Vue, Svelte, Next.js, Spring, Django, FastAPI, Node.js, Deno, Bun, etc.).\n"
-        "• Tooling de desarrollo (Vite, Webpack, Babel, SWC, esbuild, VS Code, JetBrains, Git, GitHub/GitLab changelogs).\n"
-        "• Seguridad relevante para devs (OpenSSL, OpenSSH, RustSec, Node security, etc.).\n\n"
+        "## Criterios de calidad para aceptar una fuente\n"
+        "1. Debe ser un feed RSS/Atom accesible (HTTP 200) y bien formado.\n"
+        "2. Debe publicar changelogs, lanzamientos, vulnerabilidades o artículos técnicos "
+        "directamente relacionados con lenguajes (Python, Java, JavaScript, TypeScript, Go, Rust, Kotlin, etc...), "
+        "frameworks (React, Spring, Angular, Astro, etc...).\n"
+        "3. Da prioridad a **blogs oficiales** del lenguaje, "
+        "avances en estándares (IETF, W3C) y listas de correo convertidas a RSS.\n"
+        "4. Acepta también blogs de seguridad o laboratorios de proveedores "
+        "que publiquen CVE y parches relevantes para desarrolladores.\n\n"
 
-        "## Exclusiones (descarta si se cumple CUALQUIERA)\n"
-        "• Agregadores genéricos: Medium, Reddit, Hacker News, Dev.to, Substack personal.\n"
-        "• Marketing, notas de prensa, ofertas de empleo, eventos, webinars.\n"
-        "• Homes sin feed; solo URLs de RSS/Atom (terminan en .xml, .rss, .atom o rutas /feed, /rss.xml, /atom.xml).\n\n"
+        "## Filtros de exclusión (descarta si se cumple CUALQUIERA)\n"
+        "• Agregadores genéricos (Medium, Reddit, Hacker News, Dev.to, Substack personal, etc...).\n"
+        "• Blogs puramente comerciales o de marketing, notas de prensa, patrocinios, webinars.\n"
+        "• Anuncios de empleo, eventos, meetups, conferencias.\n"
+        "• Feeds que ya estén listados en «URLs almacenadas» o «URLs vetadas» (véase abajo).\n"
+        "• Duplicados exactos o variantes http/https, con o sin www.\n\n"
 
-        "## Diversidad y deduplicación\n"
-        "• Máximo **1 feed por dominio** salvo proyectos claramente diferentes (p.ej., nodejs.org y npmjs.com).\n"
-        "• Prioriza dominios y proyectos **no presentes** en la lista ya almacenada.\n"
-        "• No repitas la misma URL con variantes http/https o con/sin www (normaliza mentalmente a https y sin www).\n"
-        "• Intenta equilibrar la propuesta en 4 categorías: Lenguajes, Frameworks, Tooling, Seguridad.\n\n"
+        "## Formato estricto\n"
+        "• Usa siempre HTTPS si está disponible.\n"
+        "• No incluyas más de un feed por dominio a menos que cubra proyectos distintos "
+        "y claramente diferenciados.\n\n"
 
-        "## No inventes\n"
-        "• Si no estás seguro de que una URL es un **feed**, no la incluyas.\n"
-        "• Si no llegas a la cantidad solicitada, devuelve menos sin rellenar con ruido.\n\n"
-
-        "### URLs ya almacenadas (no incluir):\n"
+        "### URLs almacenadas que NO debes incluir nuevamente:\n"
     )
 
-    sys += "\n".join(f"- {s.url}" for s in sources)
-    # sys += "\n\n### URLs vetadas (no incluir):\n"
-    # sys += "\n".join(f"- {v.url}" for v in vetoed)
-
+    # Añade las listas dinámicas de `sources` y `vetoed`:
+    sys += "\n".join(f"- {source.url}" for source in sources)
     sys += (
-        "\n\n### Recordatorio final\n"
+        "\n\n"
+        "### Recordatorio final\n"
+        "• Intenta tener una lista rica de contenido, no repitas temáticas\n."
+        "• Centrate sobre todo en lenguajes de programación y frameworks."
         "• Devuelve **exclusivamente** el JSON pedido.\n"
-        "• No añadas comentarios, explicaciones ni código adicional.\n"
+        "• No incluyas comentarios, explicaciones ni código adicional.\n"
     )
 
     user = (
-        "Proporciona entre 20 y 30 **feeds RSS/Atom** de programación aún no almacenados. "
-        "Equilibra entre Lenguajes, Frameworks, Tooling y Seguridad. "
-        "Solo endpoints de feed (no páginas home)."
+        "Proporciona una lista de entre 10 o 20 fuentes de noticias relacionadas con la programación.\n"
     )
 
     response = await _response(build_kwargs(config="find", system=sys, user=user))
@@ -676,40 +676,28 @@ async def source_rss(sources: list) -> dict:
     }
 
     sys = (
-        "Eres un extractor y normalizador de metadatos RSS/Atom para fuentes de programación.\n\n"
+        "Eres un extractor de metadatos RSS.\n\n"
+        
+        "Para **cada feed** que te entregue el usuario:\n"
+        "1. Descarga el feed (HTTP 200 obligatorio). Si falla, pon \"rss\": \"None\".\n"
+        "2. Obtén el <title> del canal o, si falta, el <title> de la página HTML.\n"
+        "   Usa ese texto —sin las palabras 'RSS', 'Feed' ni 'Atom'— como nombre legible.\n"
+        "3. Deriva la URL de la home quitando la ruta del feed.\n"
+        "4. Devuelve un único objeto JSON con el siguiente formato.\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
 
-        "Para **cada feed** dado por el usuario:\n"
-        "1) DESCARGA Y VALIDA\n"
-        "   • Realiza GET con seguimiento de redirecciones (máx. 5). HTTP 200 obligatorio.\n"
-        "   • Acepta Content-Type: application/rss+xml, application/atom+xml, application/xml o text/xml.\n"
-        "   • Si el contenido NO es XML (es HTML), intenta autodiscovery en esa página buscando\n"
-        "     <link rel=\"alternate\" type=\"application/rss+xml|application/atom+xml\"> y reintenta con ese href.\n"
-        "   • Si tras esto no hay feed válido, NO incluyas la fuente o, si debes conservarla, usa \"rss\":\"None\".\n"
-        "\n"
-        "2) NOMBRE LEGIBLE\n"
-        "   • Preferencia: título del canal RSS (<channel><title>) o del feed Atom (<feed><title>).\n"
-        "   • Fallback: <title> de la página HTML o meta og:site_name.\n"
-        "   • Limpia sufijos genéricos: 'RSS', 'Feed', 'Atom', 'Blog', separadores ('|', '—', '-').\n"
-        "   • Mantén el nombre **oficial** (no traduzcas), sin emojis ni mayúsculas raras; normaliza espacios.\n"
-        "\n"
-        "3) URL CANÓNICA DEL SITIO\n"
-        "   • Preferencia: <channel><link> (RSS) o <link rel=\"alternate\" type=\"text/html\"> (Atom).\n"
-        "   • Fallback: deriva desde la URL del feed (origen + ruta base del proyecto), NO simplemente la raíz del dominio si el feed es de un subproyecto.\n"
-        "   • Normaliza: usa HTTPS si existe, elimina fragmentos y query tracking, host en minúsculas, quita 'www.' si el sitio responde igual.\n"
-        "\n"
-        "4) DEDUPE Y SANEAMIENTO\n"
-        "   • No devuelvas dominios ya presentes en «URLs almacenadas»/«vetadas».\n"
-        "   • Considera equivalentes http/https y con/sin www; trata 'blog.' y dominio raíz como duplicados salvo que representen proyectos distintos.\n"
-        "   • Si dos feeds generan el mismo nombre, desambiguar añadiendo ' (proyecto)' o el dominio entre paréntesis.\n"
-        "\n"
-        "5) SALIDA\n"
-        "   • Devuelve un ÚNICO objeto JSON exactamente con el formato siguiente:\n"
-        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n"
-        "   • Incluye solo fuentes validadas; si una falla de forma temporal y quieres conservarla, usa \"rss\":\"None\".\n"
-        "   • No añadas ningún texto fuera del JSON."
+        "Reglas extra:\n"
+        "• Fuerza HTTPS siempre que exista.\n"
+        "• No devuelvas dominios duplicados ni los listados en «URLs almacenadas»/«vetadas».\n"
+        "• No añadas ningún texto fuera del JSON."
     )
 
-    user = "Extrae y normaliza metadatos de estas URLs de feed:\n" + "".join(f"- {src}\n" for src in sources)
+    user = (
+        "Extrae metadatos de estas URLs de feed:\n"
+    )
+
+    for source in sources:
+        user += f"- {source}\n"
 
     response = await _response(build_kwargs(config="find", system=sys, user=user))
     data = None
@@ -758,6 +746,8 @@ async def validate_rss(sources: dict):
 
 async def extract_news(sources):
     log_techAI.info(f"Extrayendo noticias de {len(sources)} fuentes...")
+
+    sources = database.get_news_sources_by_score(0, "greater")
 
     today = datetime.now()
     seven_day = today - timedelta(days=7)

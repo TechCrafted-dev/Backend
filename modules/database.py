@@ -50,8 +50,8 @@ class NewsSource(Base):
     __tablename__ = 'news_source'
     id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la fuente de noticias
     name = Column(String, nullable=False, unique=True)           # Nome de la fuente de noticias
-    url = Column(String, nullable=False)                         # URL de la fuente de noticias
-    rss = Column(String, nullable=False)                         # URL del RSS de la fuente
+    url = Column(String, nullable=False, unique=True)            # URL de la fuente de noticias
+    rss = Column(String, nullable=False, unique=True)            # URL del RSS de la fuente
     added_at = Column(DateTime, nullable=False)                  # Fecha de adición de la fuente
     score = Column(Integer, nullable=False, default=0)           # Puntuación de la fuente
 
@@ -239,7 +239,7 @@ def save_news_source(new_source: NewsSource):
     with SessionLocal() as session:
         session.add(new_source)
         session.commit()
-        log_database.info(f"Fuente de noticias {new_source.name} guardada exitosamente.")
+        log_database.info(f"Fuente de noticias guardada exitosamente.")
 
 def get_news_sources():
     with SessionLocal() as session:
@@ -296,14 +296,10 @@ def get_news_sources_by_score(score: int, comparison: str = "greater"):
         elif comparison == "less":
             sources = session.query(NewsSource).filter(NewsSource.score <= score).all()
 
-        else:
-            log_database.warning("Comparación inválida. Use 'greater' o 'less'.")
-            return []
-
         if sources:
-            log_database.info(f"{len(sources)} fuentes de noticias recuperadas exitosamente con score {comparison} a {score}.")
+            log_database.info(f"Recuperas {len(sources)} fuentes de noticias.")
             return sources
 
         else:
-            log_database.warning(f"No se encontraron fuentes de noticias con score {comparison} a {score}.")
+            log_database.warning(f"No se encontraron fuentes de noticias.")
             return []
