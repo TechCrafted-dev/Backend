@@ -1,13 +1,10 @@
 import re
 import json
-import time
 import httpx
-import asyncio
 import requests
 
-from pathlib import Path
+from typing import Any
 from enum   import Enum, auto
-from typing import Any, Dict, Iterable
 
 from dateutil.parser import isoparse
 from datetime import datetime, timedelta
@@ -94,26 +91,6 @@ def build_kwargs(*, config: str, system: str, user: str):
     return kwargs
 
 
-def build_batch_lines(*, config: str, system: str, prompts: Iterable[str]):
-    """
-    Genera cada línea JSONL usando build_kwargs para mantener paridad con _response.
-    """
-    for i, up in enumerate(prompts, start=1):
-        body = build_kwargs(config=config, system=system, user=up)  # reutiliza tu constructor
-        yield {
-            "custom_id": f"req-{i}",
-            "method": "POST",
-            "url": "/v1/responses",
-            "body": body,  # incluye model, input, tools/reasoning, etc.
-        }
-
-def write_jsonl(path: str, lines: Iterable[dict]) -> Path:
-    p = Path(path)
-    with p.open("w", encoding="utf-8") as f:
-        for obj in lines:
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    return p
-
 # ---------- HELPERS ----------
 async def _chat(system: str, user: str) -> str:
     try:
@@ -145,78 +122,6 @@ async def _response(payload: dict):
     except Exception as e:
         log_techAI.error("Error durante la ejecución de responses: %s", e)
         raise
-
-
-async def _batch(
-    system: str,
-    user_prompts: Iterable[str],
-    *,
-    config: str = "search",            # usa tu CAPABILITIES["search"] (o "reasoner" si quieres)
-    jsonl_path: str = "requests.jsonl",
-    poll_interval: float = 5.0,
-    max_wait_seconds: float = 1800.0,
-) -> Dict[str, Any]:
-    # 1) JSONL con build_kwargs (paridad con _response)
-    lines = build_batch_lines(config=config, system=system, prompts=user_prompts)
-    p = write_jsonl(jsonl_path, lines)
-
-    # 2) Subir archivo + crear batch (igual que ya tienes)
-    in_file = await aclient.files.create(file=p, purpose="batch")
-    batch = await aclient.batches.create(
-        input_file_id=in_file.id,
-        endpoint="/v1/responses",
-        completion_window="24h"
-    )
-
-    # 3) Polling (igual)
-    t0 = time.time()
-    terminal = {"completed", "failed", "cancelled", "cancelling", "expired", "finalizing"}
-    while True:
-        batch = await aclient.batches.retrieve(batch.id)
-        if batch.status in terminal:
-            break
-        if time.time() - t0 > max_wait_seconds:
-            raise TimeoutError(f"Batch {batch.id} sin finalizar tras {max_wait_seconds}s (estado actual: {batch.status}).")
-        await asyncio.sleep(poll_interval)
-
-    if batch.status != "completed":
-        return {"ok": False, "status": batch.status, "batch": batch.model_dump()}
-
-    # 4) Descargar y parsear (igual que ya tienes)
-    resp = await aclient.files.content(batch.output_file_id)
-    raw_bytes_list = [chunk async for chunk in resp.aiter_bytes()]
-    raw_bytes = b"".join(raw_bytes_list)
-    lines = raw_bytes.decode("utf-8").splitlines()
-
-    results: Dict[str, Any] = {}
-    for line in lines:
-        obj = json.loads(line)
-        cid = obj.get("custom_id")
-        r = obj.get("response")
-        if r and 200 <= r.get("status_code", 0) < 300:
-            body = r.get("body", {})
-            text = body.get("output_text")
-            if text is None:
-                text_parts = []
-                for item in body.get("output", []):
-                    for c in item.get("content", []):
-                        if c.get("type") in ("output_text", "text"):
-                            text_parts.append(c.get("text", ""))
-                text = "".join(text_parts) if text_parts else ""
-            results[cid] = {"ok": True, "text": text, "raw": body}
-        else:
-            results[cid] = {"ok": False, "error": obj.get("error") or r}
-
-    return results
-
-
-async def _batch_texts(system: str, user_prompts: Iterable[str], *, config: str = "search") -> list[str | None]:
-    results = await _batch(system, user_prompts, config=config)
-    out = []
-    for i, _ in enumerate(user_prompts, start=1):
-        item = results.get(f"req-{i}")
-        out.append(item["text"] if item and item.get("ok") else None)
-    return out
 
 
 # ---------- TOOLS ----------
@@ -797,7 +702,6 @@ async def extract_news(sources):
                 for chunk in entry.content:
                     if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
                         data = chunk.text
-
 
         resources = _extract_json(data)
         if len(resources) != 0:
