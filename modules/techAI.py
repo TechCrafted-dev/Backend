@@ -653,21 +653,29 @@ async def _run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
             log_techAI.info("No es necesario actualizar el Post.")
             return False
 
-    if mode is Pipeline.POST:
-        readme = await tool_fetch_readme(data)
-        analysis = await tool_analyze_repo(data, readme)
-        outline = await tool_generate_outline(analysis)
-        post = await tool_write_post(outline, data, readme)
-        cleaner = await tool_markdown_polish(post)
-        return cleaner
+        # Generador de posts
+        case Pipeline.POST:
+            readme = await tool_fetch_readme(data)
+            analysis = await tool_analyze_repo(data, readme)
+            outline = await tool_generate_outline(analysis)
+            post = await tool_write_post(outline, data, readme)
+            cleaner = await tool_markdown_polish(post)
+            return cleaner
 
-    if mode is Pipeline.NEWS:
-        sources = await tool_source_news()
-        news = await tool_get_news(sources)
-        cleaner = await tool_cleanup_news(news)
-        sort = sorted(cleaner, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-        redactor = await tool_redactor(sort)
-        return redactor
+        # Buscar y actualizar fuentes de noticias
+        case Pipeline.SRCS:
+            find_sources = await tool_source_news()
+            get_rss = await tool_source_rss(find_sources)
+            sources = await tool_validate_rss(get_rss)
+            return sources
+
+        # Extraer y generar noticias de la semana
+        case Pipeline.NEWS:
+            news_week = await tool_extract_news()
+            news_sorted = sorted(news_week, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
+            log_techAI.info(json.dumps(news_sorted, ensure_ascii=False, indent=2))
+            posts_news = await tool_gen_news(news_sorted)
+            return posts_news
 
     return None
 
@@ -681,6 +689,12 @@ async def test_pipeline(mode: Pipeline) -> list:
 # ---------- GENERATE POST ----------
 async def gen_post(data, mode: Pipeline) -> str:
     log_techAI.info("Generando post...")
+
+    if mode == Pipeline.EVAL:
+        if not await _run_pipeline(data, mode):
+            return None
+
+        mode = Pipeline.POST
 
     try:
         data = data if isinstance(data, dict) else json.loads(data)
