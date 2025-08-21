@@ -75,17 +75,42 @@ $ source .venv/bin/activate
 # 3. Instala dependencias
 $ pip install -r requirements.txt
 
-# 4. Configura tus variables de entorno
+# 4. Configura tus variables de entorno y ajustes
 # Copia el archivo de ejemplo y añade tus claves de API
 $ cp .env.example .env
 
-# → Renombra el archivo config_template.json a config.json
-# → Edita config.json con tus ajustes específicos:
+# Renombra el archivo config_template.json a config.json
+# Edita config.json con tus ajustes específicos.
 
 # 5. Inicia la API
-$ uvicorn main:modules --reload
+# El script utiliza la configuración definida en main.py, que no activa la recarga automática.
+$ python main.py
 
 ```
+
+### Logging
+
+La API utiliza el sistema de logging nativo de Python y está configurada para ofrecer un control granular sobre la salida de cada módulo.
+
+- **Configuración Centralizada:** Toda la configuración de logging se gestiona en `modules/config.py`.
+- **Niveles Personalizables:** Puedes personalizar los niveles de logging para cada componente (`main`, `database`, `techAI`, `httpx`, etc.) directamente desde el archivo `data/config.json` sin necesidad de modificar el código.
+
+Para ajustar los niveles, añade un objeto `LOGGER` a tu `data/config.json` así:
+
+```json
+{
+  "GITEA": {
+    "...": "..."
+  },
+  "LOGGER": {
+    "main": "DEBUG",
+    "database": "WARNING",
+    "httpx": "WARNING"
+  }
+}
+```
+
+Los niveles de logging soportados son `DEBUG`, `INFO`, `WARNING`, `ERROR`, y `CRITICAL`. Al iniciar, la aplicación informará qué niveles personalizados se han cargado.
 
 
 ### Despliegue con Docker
