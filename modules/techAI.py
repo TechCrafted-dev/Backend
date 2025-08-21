@@ -1,12 +1,17 @@
 import re
 import json
 import httpx
+import requests
 
 from typing import Any
 from enum   import Enum, auto
+
 from dateutil.parser import isoparse
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
+
+from modules import database
 from modules.config import log_techAI, settings
 
 from openai import AsyncOpenAI, RateLimitError
@@ -17,19 +22,24 @@ API_KEY = settings['OPENAI']['API-KEY']
 
 # ---------- OPENAI -------------
 aclient = AsyncOpenAI(api_key=API_KEY)
-MODEL = "gpt-4o"
-TEMP  = 0.7
 MAX_TOKENS = 8192
 CAPABILITIES = {
     "chat":     {"model": "gpt-4o", "max_output_tokens": True,  "tool_choice": True, "search": False, "reasoner": False},
-    "search":   {"model": "gpt-4o", "max_output_tokens": True,  "tool_choice": True, "search": True, "reasoner": False},
+    "find":   {"model": "gpt-4o", "max_output_tokens": True,  "tool_choice": True, "search": True, "reasoner": False},
+    "search": {"model": "o4-mini", "max_output_tokens": False, "tool_choice": False, "search": True, "reasoner": True},
     "reasoner": {"model": "o4-mini", "max_output_tokens": False, "tool_choice": False, "search": False, "reasoner": True},
     "research": {"model": "o4-mini-deep-research", "max_output_tokens": False, "tool_choice": False, "search": True, "reasoner": False},
 }
 
+New_CAPABILITIES = {
+    "chat": {"search": False, "reasoner": False},
+    "reasoner": {"search": False, "reasoner": True},
+    "search": {"search": True, "reasoner": False},
+    "research": {"search": True, "reasoner": True},
+}
 
 # ---------- UTILS ----------
-def extract_json(text: str) -> list[Any] | Any:
+def _extract_json(text: str) -> dict | Any:
     match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
 
     try:
@@ -49,7 +59,7 @@ def extract_json(text: str) -> list[Any] | Any:
     except Exception as e:
         log_techAI.error("Error obteniendo noticias: %s", e)
 
-    return []
+    return {}
 
 
 def build_kwargs(*, config: str, system: str, user: str):
@@ -87,12 +97,45 @@ def build_kwargs(*, config: str, system: str, user: str):
     return kwargs
 
 
+def new_build_kwargs(*, config: str, system: str, user: str):
+    caps = New_CAPABILITIES[config]
+    kwargs = {
+        "model": "gpt-5",
+        "input": [
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user}]},
+        ],
+        "text": {"format": {"type": "text"}, "verbosity": "medium"},
+        "reasoning": {"effort": "minimal"},
+        "tools": [],
+        "tool_choice": "auto"
+    }
+
+    # BUSCADOR
+    if caps.get("search"):
+        kwargs["reasoning"] = {"effort": "low"}
+        kwargs["tools"] = [{
+            "type": "web_search_preview",
+            "user_location": {
+                "type": "approximate"
+            },
+            "search_context_size": "medium"
+        }]
+
+    # RAZONADOR
+    if caps.get("reasoner"):
+        kwargs["reasoning"] = {"effort": "medium"}
+
+
+    return kwargs
+
+
 # ---------- HELPERS ----------
 async def _chat(system: str, user: str) -> str:
     try:
         response = await aclient.chat.completions.create(
-            model=MODEL,
-            temperature=TEMP,
+            model="gpt-4o",
+            temperature=0.7,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user}
@@ -266,278 +309,396 @@ async def tool_markdown_polish(draft_md: str) -> str:
     return cleaned
 
 
-# - Obtiene enlaces de proveedores de noticias más importantes [_response][search]
-async def tool_source_news() -> list:
+# - Obtiene enlaces de fuentes de noticias [_response][find]
+async def tool_source_news():
+    sources = database.get_news_sources()
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
+    model = """
+    {
+      "news_sources": [
+        {
+          "url1": "https://example.com/rss.xml",
+          "url2": "https://example.org/feed.atom"
+        }
+      ]
+    }"""
+
     sys = (
-        "Eres un asistente que busca y proporciona enlaces de fuentes de noticias de programación.\n"
-        "Asegurate de que las URLs son relevantes y actualizadas.\n"
-        "Descarta aquellas fuentes que no estén al día.\n\n"
-        
-        "Siempre devuelve una lista de enlaces en formato JSON con la siguiente estructura:\n"
-        "{'sources': ['url1', 'url2', ...]}\n\n"
-        
-        "URLs vetadas que no debes agregar:\n"
-        " - https://www.noticias.dev"
+        "Eres un asistente experto en programación informática. "
+        "Tu tarea es encontrar y devolver **únicamente URLs de feeds RSS o Atom** "
+        "con noticias de programación RELEVANTES y ACTUALIZADAS.\n\n"
+
+        "## Requisitos del resultado\n"
+        "• Responde **SOLO** con JSON válido, sin texto adicional, "
+        "y siguiendo exactamente la estructura:\n"
+        f"{model}\n\n"
+
+        "## Criterios de calidad para aceptar una fuente\n"
+        "1. Debe ser un feed RSS/Atom accesible (HTTP 200) y bien formado.\n"
+        "2. Busca blogs oficiales de lenguajes (Python, Java, JavaScript, TypeScript, CSS, HTML), "
+        "frameworks (React, Spring, Angular, Astro, Vue) y Inteligencia Artificial (OpenAI, Gemini, Claude).\n"
+
+        "## Filtros de exclusión (descarta si se cumple CUALQUIERA)\n"
+        "• Agregadores genéricos (Medium, Reddit, Hacker News, Dev.to, Substack personal, etc...).\n"
+        "• Blogs puramente comerciales o de marketing, notas de prensa, patrocinios, webinars.\n"
+        "• Anuncios de empleo, eventos, meetups, conferencias.\n"
+        "• Feeds que ya estén listados en «URLs almacenadas» o «URLs vetadas» (véase abajo).\n"
+        "• Duplicados exactos o variantes http/https, con o sin www.\n\n"
+
+        "## Formato estricto\n"
+        "• Usa siempre HTTPS si está disponible.\n"
+        "• No incluyas más de un feed por dominio a menos que cubra proyectos distintos "
+        "y claramente diferenciados.\n\n"
+
+        "### URLs almacenadas que NO debes incluir nuevamente:\n"
     )
-    user = "Proporciona una lista de fuentes de noticias relacionadas con la programación."
-    response = await _response(build_kwargs(config="search", system=sys, user=user))
 
-    msg = next(
-        item for item in response.output
-        if item.type == "message"
+    # Añade las listas dinámicas de `sources` y `vetoed`:
+    sys += "\n".join(f"- {source.url}" for source in sources)
+    sys += (
+        "\n\n"
+        "### Recordatorio final\n"
+        "• Intenta tener una lista rica de contenido, no repitas temáticas\n."
+        "• Centrate sobre todo en lenguajes de programación y frameworks."
+        "• Devuelve **exclusivamente** el JSON pedido.\n"
+        "• No incluyas comentarios, explicaciones ni código adicional.\n"
     )
 
-    sources = msg.content[0].text
-    sources = extract_json(sources)
-    return sources.get('sources', [])
+    user = (
+        "Proporciona una lista de entre 10 o 20 fuentes de noticias relacionadas con la programación.\n"
+    )
+
+    response = await _response(build_kwargs(config="find", system=sys, user=user))
+    data = None
+    for entry in response.output:
+        if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+            for chunk in entry.content:
+                if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                    data = chunk.text
+
+    sources = _extract_json(data)
+
+    log_techAI.info("Fuentes obtenidas:\n%s", sources.get('news_sources', []))
+    return sources.get('news_sources', [])
 
 
-# - Obtiene noticias de las fuentes proporcionadas [_response][search]
-async def tool_get_news(sources: list) -> dict:
-    log_techAI.info(f"Obteniendo noticias de {len(sources)} fuentes:")
+# - Normaliza las fuentes RSS [_response][find]
+async def tool_source_rss(sources: list) -> dict:
+    log_techAI.info(f"Normalizando RSS de {len(sources[0])} fuentes:")
 
     model = {
-            "title": "Titulo de la noticia",
-            "url": "URL de la noticia",
-            "date": "YYYY-MM-DD",
+        "Nombre de la fuente": {
+            "url": "url canónico de la fuente",
+            "rss": "url del rss o feed"
+        }
     }
 
     sys = (
-        "Eres un asistente que recopila noticias tecnológicas de las fuentes "
-        "proporcionadas, con énfasis en programación (Python, Java, JavaScript, "
-        "TypeScript, Go, Rust, etc.).\n\n"
-
-        f"Hoy es {datetime.now().strftime('%d de %B del %Y')}.\n"
-        "Considera únicamente las noticias publicadas esta semana.\n\n"
-
-        "- Analiza únicamente los titulares, no profundices en el contenido completo.\n"
-        "- Traduce los títulos al español si están en otro idioma.\n"
-        "- Descarta artículos que sean notas de prensa, ofertas de empleo, "
-        "eventos o contenido puramente comercial.\n"
-        "- Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
-        "frameworks o herramientas relevantes para desarrolladores.\n\n"
-        "- No inventes información, usa únicamente la fuente dada.\n"
-
-        "Devuelve tu respuesta **exclusivamente** como una lista JSON con la "
-        "estructura siguiente (sin texto adicional):\n"
+        "Eres un extractor de metadatos RSS.\n\n"
+        
+        "Para **cada feed** que te entregue el usuario:\n"
+        "1. Descarga el feed (HTTP 200 obligatorio). Si falla, pon \"rss\": \"None\".\n"
+        "2. Obtén el <title> del canal o, si falta, el <title> de la página HTML.\n"
+        "   Usa ese texto —sin las palabras 'RSS', 'Feed' ni 'Atom'— como nombre legible.\n"
+        "3. Deriva la URL de la home quitando la ruta del feed.\n"
+        "4. Devuelve un único objeto JSON con el siguiente formato.\n"
         f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
 
-        "Si no encuentras noticias relevantes, devuelve un JSON con una lista "
-        "vacía: `[]`.\n"
+        "Reglas extra:\n"
+        "• Fuerza HTTPS siempre que exista.\n"
+        "• No devuelvas dominios duplicados ni los listados en «URLs almacenadas»/«vetadas».\n"
+        "• No añadas ningún texto fuera del JSON."
     )
 
-    news = {}
+    user = (
+        "Extrae metadatos de estas URLs de feed:\n"
+    )
+
+    for source in sources:
+        user += f"- {source}\n"
+
+    response = await _response(build_kwargs(config="find", system=sys, user=user))
+    data = None
+    for entry in response.output:
+        if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+            for chunk in entry.content:
+                if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                    data = chunk.text
+
+    sources = _extract_json(data)
+
+    return sources
+
+
+# - Valida las fuentes RSS
+async def tool_validate_rss(sources: dict):
+    log_techAI.info("Validando RSS...")
+
+    for source, data in sources.items():
+        try:
+            resp = requests.get(data['rss'], timeout=10)
+
+        except Exception as e:
+            continue
+
+        if resp.status_code == 200:
+            log_techAI.info("Fuente %s disponible", source)
+
+            try:
+                new_source = database.NewsSource(
+                    name=source,
+                    url=data['url'],
+                    rss=data['rss'],
+                    added_at=datetime.now(),
+                    score=1
+                )
+
+                database.save_news_source(new_source)
+
+            except IntegrityError as e:
+                log_techAI.warning("Fuente ya almacenada: %s", source)
+
+            except Exception as e:
+                log_techAI.info("Error al guardar la fuente: %s", e)
+                raise e
+
+    return database.get_news_sources()
+
+
+# - Extrae las últimas noticias de la semana [_response][search]
+async def tool_extract_news():
+    sources = database.get_news_sources()
+    log_techAI.info(f"Extrayendo noticias de {len(sources)} fuentes...")
+
+    today = datetime.now()
+    seven_day = today - timedelta(days=7)
+
+    model = {
+        "title": "Título de la noticia en español",
+        "url": "URL de la noticia",
+        "date": "YYYY-MM-DD"
+    }
+
+    sys = (
+        "Eres un asistente que recopila titulares tecnológicos centrados en programación "
+        "(Python, Java, JavaScript, TypeScript, Go, Rust, etc.) a partir de fuentes RSS proporcionadas.\n\n"
+
+        f"Hoy es {today.strftime('%d de %B de %Y')}.\n"
+        f"Analiza exclusivamente las noticias publicadas ENTRE {seven_day.strftime('%Y-%m-%d')} "
+        f"y {today.strftime('%Y-%m-%d')} (últimos 7 días, inclusive).\n\n"
+
+        "REGLAS DE FILTRADO\n"
+        "• Usa SOLO el título y la fecha del ítem RSS; no abras el artículo.\n"
+        "• Traduce el título al español si está en otro idioma.\n"
+        "• Descarta notas de prensa, anuncios de empleo, eventos o contenido puramente comercial.\n"
+        "• Prioriza versiones nuevas, vulnerabilidades críticas, frameworks o herramientas útiles para desarrolladores.\n"
+        "• No inventes datos: si un campo no existe o falta la fecha, descarta el ítem.\n\n"
+
+        "FORMATO DE RESPUESTA\n"
+        "• Devuelve ÚNICAMENTE una lista JSON (sin texto adicional) con la forma exacta del modelo siguiente.\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n\n"
+        "• Si no hay noticias válidas, responde una lista vacia: []\n"
+    )
+
+    news_week = []
     count = 1
     for source in sources:
-        log_techAI.info(f"{count}: {source}")
+        user = (
+            "Recopila noticias de programación de los últimos 7 días.\n"
+            f"Fuente RSS: {source.rss}\n"
+        )
+
+        log_techAI.info(f"({count}/{len(sources)}) {source.name}")
         count += 1
 
-        user = (
-            "Recopila noticias de programación.\n"
-            f"Aquí tienes la URL de la fuente: {source}."
-        )
+        response = await _response(new_build_kwargs(config="search", system=sys, user=user))
+        data = None
+        for entry in response.output:
+            if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                for chunk in entry.content:
+                    if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                        data = chunk.text
 
-        try:
-            response = await _response(build_kwargs(config="search", system=sys, user=user))
-
-            content = None
-            for entry in response.output:
-                if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
-                    for chunk in entry.content:
-                        if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
-                            content = chunk.text
-
-            log_techAI.info(content)
-            content = extract_json(content)
-
-        except Exception as e:
-            log_techAI.error("Error obteniendo noticias de %s: %s", source, e)
-            content = []
-
-        news[source] = content
-        log_techAI.info(f"Noticias obtenidas: {len(content)}")
-
-    return news
-
-
-# - Clasifica las noticias más relevantes [_response][reasoner]
-async def tool_cleanup_news(news_sources: dict) -> list:
-    log_techAI.info("Limpiando y clasificando noticias...")
-
-    model = [{
-        "title": "Titulo de la noticia en español",
-        "date": "YYYY-MM-DD",
-        "language": "Lenguaje de programación relacionado (Python, Java, etc.)",
-        "source": "URL fuente de la noticia",
-        "url": "URL de la noticia"
-    }]
-
-    sys = (
-        'Eres un asistente que organiza noticias tecnológicas.'
-        'Devuelve un JSON con la siguiente estructura:'
-        f'{json.dumps(model, ensure_ascii=False, indent=2)}\n'
-    )
-
-    today = datetime.today().date()
-    cutoff = today - timedelta(days=7)
-
-    clear_news = []
-    for site, articles in news_sources.items():
-        if not articles:
+        resources = _extract_json(data)
+        if not resources:
+            log_techAI.info("Fuente sin noticias válidas.")
             continue
 
-        recientes = [
-            art for art in articles
-            if datetime.strptime(art["date"], "%Y-%m-%d").date() >= cutoff
-        ]
+        source_id = database.get_source_id_by_name(source.name)
+        for i in range(len(resources)):
+            resources[i]["source_id"] = source_id
 
-        if not recientes:
-            continue
+        log_techAI.info("Noticias obtenidas: %s", len(resources))
+        log_techAI.debug(f"noticias:\n{resources}")
 
-        news = {"source": site, "news": []}
-        for article in articles:
-            news["news"].append(article)
+        news_week.extend(resources)
 
-        log_techAI.info("Fuente: %s", site)
-
-        user = (
-            "Analiza atentamente las noticias proporcionadas."
-            "Deben estar relacionadas con programación: Python, Java, JavaScript, etc."
-            "Descarta aquellas que no aporten valor, que sean irrelevantes o que estén duplicadas."
-            "Prioriza lanzamientos de versiones, vulnerabilidades críticas, nuevos "
-            "frameworks o herramientas relevantes para desarrolladores"
-            f"\n{json.dumps(news, ensure_ascii=False, indent=2)}"
-        )
-
-        try:
-            response = await _response(build_kwargs(config="reasoner", system=sys, user=user))
-            msg = next(
-                item for item in response.output
-                if item.type == "message"
-            )
-            data = extract_json(msg.content[0].text)
-            clear_news.extend(data)
-
-        except Exception as e:
-            log_techAI.error("Error limpiando noticias: %s", e)
-            raise
-
-    total_news = sum(len(articles) for articles in news_sources.values())
-    log_techAI.info("Eran %s noticias, quedan %s tras la limpieza.", total_news, len(clear_news))
-    return clear_news
+    log_techAI.debug(f"news_week:\n{news_week}")
+    return news_week
 
 
-# - Redacta las noticias en formato Markdown [_response][search]
-async def tool_redactor(news: list) -> list:
-    log_techAI.info("Redactando las noticias...")
+# - Genera las publicaciones de las noticias [_response][research]
+async def tool_gen_news(news_week):
+    log_techAI.info(f"Generando publicaciones de {len(news_week)} noticias.")
+
+    model = {
+        "sumary": {
+            "introduction": "Entradilla",
+            "content": "Contenido"
+        }
+    }
+
     sys = (
-        "Eres un redactor profesional que escribe artículos de noticias tecnológicas.\n"
-        "Usa la fuente y la URL de la noticia para proporcionar contexto.\n"
-        "Utiliza un tono directo y profesional, pero cercano.\n"
-        "Devuelve el resultado en formato Markdown.\n\n"
+        "Eres un redactor técnico especializado. "
+        "Debes acceder a la URL, leer la fuente original y generar un post compuesto por dos partes:\n"
+        " • Entradilla: un párrafo que haga de introducción la publicación.\n"
+        " • Contenido: Continuación de la entradilla dando mas detalles.\n\n"
+        
+        "Reglas de calidad:\n"
+        " • Sin inventar, todo debe venir de la fuente.\n"
+        " • Siempre visita la URL dada. Si la página no carga, responde con {}.\n"
+        " • Citas textuales, si las usas, máximo 20 palabras por cita.\n"
+        " • Estilo claro, conciso, neutral, ligeramente divulgativo.\n"
+        " • No añadas opiniones, sólo contexto comprobable.\n\n"
 
-        "Al final del artículo, incluye una línea horizontal `---` e invita a visitar la pagina de la noticia.\n\n"
+        "Entradilla:\n"
+        " • Al rededor de 45–80 palabras.\n"
+        " • **No incluyas titulo ni fecha**.\n\n"
 
-        "No incluyas ni fechas ni urls en el artículo.\n"
-        "No inventes información, usa únicamente los datos proporcionados.\n"
-        "Si la URL de la noticia no es válida, descártala respondiendo únicamente None."
+        "Contenido ampliado:\n"
+        " • Al rededor de 300–600 palabras\n"
+        " • Continuación de la entradilla."
+        " • Usa Markdown como estilo\n\n"
+
+        "Método de salida:\n"
+        " • Debe ser **únicamente** en formato JSON.\n"
+        " • No agreges comentarios y texto adicional.\n"
+        " • Siempre traduce al español."
+        " • Usa la siguiente estructura:\n"
+        f"{json.dumps(model, ensure_ascii=False, indent=2)}\n"
     )
 
-    final_news = []
-    for news_item in news:
-        log_techAI.info(f"URL: {news_item['url']}")
+    posts_news = []
+    for news in news_week:
         user = (
-            f"### {news_item['title']}\n"
-            f"- **Fecha:** {news_item['date']}\n"
-            f"- **Lenguaje:** {news_item['language']}\n"
-            f"- **Fuente:** [{news_item['source']}]"
-            f"- **Url:** ({news_item['url']})\n"
+            "Genera un post de la siguiente url dada:\n"
         )
 
+        if database.get_news_by_url(news["url"]):
+            log_techAI.warning("Noticia ya generada.")
+            continue
+
+        log_techAI.info(f"Generando noticia para la url: {news['url']}")
+        user += f"URL: {news['url']}\n"
+
+        response = await _response(new_build_kwargs(config="research", system=sys, user=user))
+        data = None
+        for entry in response.output:
+            if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
+                for chunk in entry.content:
+                    if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
+                        data = chunk.text
+
+        summary = _extract_json(data)
+        if not summary:
+            log_techAI.warning("Noticia descartada por el modelo.")
+            continue
+
         try:
-            response = await _response(build_kwargs(config="search", system=sys, user=user))
-            data = None
-            for entry in response.output:
-                if isinstance(entry, ResponseOutputMessage) or entry.type == "message":
-                    for chunk in entry.content:
-                        if isinstance(chunk, ResponseOutputText) or chunk.type == "output_text":
-                            data = chunk.text
+            log_techAI.debug(f"Introduccion:\n{summary['sumary']['introduction']}")
+            news["introduction"] = summary["sumary"]["introduction"]
 
-            # Si None descartar
-            if data in (None, "None"):
-                log_techAI.info("Descartada por irrelevante o duplicada")
-                continue
+            log_techAI.debug(f"Contenido:\n{summary['sumary']['content']}")
+            news["content"] = summary["sumary"]["content"]
 
-            # Extraer o dejar tal cual
-            markdown_pattern = re.compile(r"```(?:markdown)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
-            match = markdown_pattern.search(data) if isinstance(data, str) else None
-            summary = match.group(1).strip() if match else str(data).strip()
-
-            # Guardar
-            news_item_with_summary = news_item.copy()
-            news_item_with_summary["summary"] = summary
-            final_news.append(news_item_with_summary)
-
+            posts_news.append(news)
 
         except Exception as e:
-            log_techAI.error("Error redactando las noticias: %s", e)
-            raise
+            log_techAI.error(f"Error en la respuesta del modelo: {e}")
 
-    return final_news
+    log_techAI.debug(f"posts_news:\n{posts_news}")
+    return posts_news
+
+
+# - Formatea el contenido a Markdown
+async def tool_markdown_format():
+    pass
 
 
 # ---------- PIPELINES ----------
 class Pipeline(Enum):
-    TEST = auto()         # Para pruebas
-    EVAL = auto()         # Para comprobar si ha cambiado
-    POST = auto()         # Para generar posts
-    NEWS = auto()         # Para obtener noticias
+    TEST = auto()     # Para pruebas
+    EVAL = auto()     # Para comprobar si ha cambiado
+    POST = auto()     # Para generar posts
+    SRCS = auto()     # Para obtener fuentes de noticias
+    NEWS = auto()     # Para obtener noticias
 
 
-async def run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
+async def _run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
 
-    if mode is Pipeline.TEST:
-        log_techAI.info("Modo de prueba activado.")
-        return "Pipeline de prueba ejecutado correctamente."
+    match mode:
+        # Para pruebas
+        case Pipeline.TEST:
+            pass
 
-    if mode is Pipeline.EVAL:
-        last_date = isoparse(data['updated_at'])
-        if last_date > datetime.now() - timedelta(days=7):
-            log_techAI.warning("El repositorio ha sido actualizado recientemente.")
-            mode = Pipeline.POST
+        # Evaluación de actualización de repositorios
+        case Pipeline.EVAL:
+            last_date = isoparse(data['updated_at'])
+            if last_date > datetime.now() - timedelta(days=7):
+                log_techAI.warning("El repositorio ha sido actualizado recientemente.")
+                return True
 
-        else:
             log_techAI.info("No es necesario actualizar el Post.")
+            return False
 
-    if mode is Pipeline.POST:
-        readme = await tool_fetch_readme(data)
-        analysis = await tool_analyze_repo(data, readme)
-        outline = await tool_generate_outline(analysis)
-        post = await tool_write_post(outline, data, readme)
-        cleaner = await tool_markdown_polish(post)
-        return cleaner
+        # Generador de posts
+        case Pipeline.POST:
+            readme = await tool_fetch_readme(data)
+            analysis = await tool_analyze_repo(data, readme)
+            outline = await tool_generate_outline(analysis)
+            post = await tool_write_post(outline, data, readme)
+            cleaner = await tool_markdown_polish(post)
+            return cleaner
 
-    if mode is Pipeline.NEWS:
-        sources = await tool_source_news()
-        news = await tool_get_news(sources)
-        cleaner = await tool_cleanup_news(news)
-        sort = sorted(cleaner, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-        redactor = await tool_redactor(sort)
-        return redactor
+        # Buscar y actualizar fuentes de noticias
+        case Pipeline.SRCS:
+            find_sources = await tool_source_news()
+            get_rss = await tool_source_rss(find_sources)
+            sources = await tool_validate_rss(get_rss)
+            return sources
+
+        # Extraer y generar noticias de la semana
+        case Pipeline.NEWS:
+            news_week = await tool_extract_news()
+            news_sorted = sorted(news_week, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
+            log_techAI.info(json.dumps(news_sorted, ensure_ascii=False, indent=2))
+            posts_news = await tool_gen_news(news_sorted)
+            return posts_news
 
     return None
+
+# ---------- TEST ----------
+async def test_pipeline(mode: Pipeline) -> list:
+    log_techAI.info("Ejecutando el pipeline de prueba...")
+    await _run_pipeline({}, mode)
+    log_techAI.info("Pipeline de prueba completado.")
 
 
 # ---------- GENERATE POST ----------
 async def gen_post(data, mode: Pipeline) -> str:
     log_techAI.info("Generando post...")
 
+    if mode == Pipeline.EVAL:
+        if not await _run_pipeline(data, mode):
+            return None
+
+        mode = Pipeline.POST
+
     try:
         data = data if isinstance(data, dict) else json.loads(data)
-        response = await run_pipeline(data, mode)
+        response = await _run_pipeline(data, mode)
 
         if response is None:
             log_techAI.info("Post generado con éxito.")
@@ -551,9 +712,11 @@ async def gen_post(data, mode: Pipeline) -> str:
 
 # ---------- GET NEWS ----------
 async def get_news(mode: Pipeline) -> list:
+    log_techAI.info("Obteniendo noticias...")
+
     try:
-        response = await run_pipeline({}, mode)
-        log_techAI.info(response)
+        response = await _run_pipeline({}, mode)
+        log_techAI.debug(f"response:\n{json.dumps(response, ensure_ascii=False, indent=2)}")
         return response
 
     except Exception as e:

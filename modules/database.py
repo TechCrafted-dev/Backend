@@ -1,4 +1,3 @@
-import os
 import time
 
 from modules.config import log_database
@@ -39,13 +38,21 @@ class Posts(Base):
 class News(Base):
     __tablename__ = 'news'
     id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la noticia
+    source_id = Column(String, nullable=False)                   # ID de la Fuente
     title = Column(String, nullable=False, unique=True)          # Título de la noticia
-    summary = Column(String, nullable=False)                     # Contenido de la noticia
-    created_at = Column(DateTime, nullable=False)                # Fecha de la noticia
-    language = Column(String, nullable=False)                    # Lenguaje de programación
-    source = Column(String, nullable=False)                      # Fuente de la noticia
-    url = Column(String, nullable=False)                         # URL de la noticia
+    introduction = Column(String, nullable=False)                # Introducción a la noticia
+    content = Column(String, nullable=False)                     # Contenido de la noticia
+    published_at = Column(DateTime, nullable=False)              # Fecha de publicación
+    url = Column(String, nullable=False, unique=True)            # URL de la noticia
 
+class NewsSource(Base):
+    __tablename__ = 'news_source'
+    id = Column(Integer, primary_key=True, autoincrement=True)   # ID de la fuente
+    name = Column(String, nullable=False, unique=True)           # Nome de la fuente
+    url = Column(String, nullable=False, unique=True)            # URL de la fuente
+    rss = Column(String, nullable=False, unique=True)            # URL del RSS de la fuente
+    added_at = Column(DateTime, nullable=False)                  # Fecha de adición de la fuente
+    score = Column(Integer, nullable=False, default=0)           # Puntuación de la fuente
 
 # Configuración de la base de datos SQLite
 DATABASE_URL = "sqlite:///data/repositories.db"
@@ -65,24 +72,57 @@ def after_cursor_execute(conn, cursor, statement, parameters, context, executema
     log_database.debug(f"Consulta completada en {total:.3f}s.")
 
 
-# Crear la base de datos solo si no existe
-db_path = DATABASE_URL.replace("sqlite:///", "")
-if not os.path.exists(db_path):
+def check_table_structure(model, inspector, logger):
+    """
+    Compara la estructura de un modelo SQLAlchemy con la tabla real en la BD.
+    Si no coincide, la tabla se elimina para ser recreada, perdiendo todos los datos.
+    """
+    table_name = model.__tablename__
+    if not inspector.has_table(table_name):
+        logger.info(f"La tabla '{table_name}' no existe y será creada.")
+        return  # No hay nada que comparar, create_all se encargará
+
+    db_columns = {col['name'] for col in inspector.get_columns(table_name)}
+    model_columns = {col.name for col in model.__table__.columns}
+
+    missing_in_db = model_columns - db_columns
+    extra_in_db = db_columns - model_columns
+
+    if not missing_in_db and not extra_in_db:
+        logger.info(f"La estructura de la tabla '{table_name}' coincide con el modelo.")
+
+    else:
+        logger.warning(f"La estructura de la tabla '{table_name}' no coincide con el modelo.")
+        if missing_in_db:
+            logger.warning(f"Columnas del modelo FALTANTES en la BD: {missing_in_db}")
+
+        if extra_in_db:
+            logger.warning(f"Columnas EXTRA en la BD no definidas en el modelo: {extra_in_db}")
+
+        logger.warning(f"ATENCIÓN: Se eliminará y recreará la tabla '{table_name}'. ¡TODOS LOS DATOS EN ESTA TABLA SE PERDERÁN!")
+        try:
+            model.__table__.drop(bind=engine)
+            logger.info(f"Tabla '{table_name}' eliminada. Será recreada con el nuevo esquema.")
+
+        except Exception as e:
+            logger.error(f"No se pudo eliminar la tabla '{table_name}': {e}. La aplicación puede ser inestable.")
+
+
+def init_db():
+    inspector = inspect(engine)
+
+    log_database.info("Verificando la estructura de las tablas de la base de datos...")
+    # Itera sobre todos los modelos registrados en Base para verificar su estructura
+    for mapper in Base.registry.mappers:
+        model_class = mapper.class_
+        check_table_structure(model_class, inspector, log_database)
+
+    # Base.metadata.create_all se asegura de que las tablas que no existen sean creadas.
     Base.metadata.create_all(bind=engine)
+    log_database.info("Inicialización de la base de datos completada.")
 
-inspector = inspect(engine)
-
-if not inspector.has_table("repos"):
-    Base.metadata.tables['repos'].create(engine)
-    log_database.info("Tabla 'repos' creada exitosamente.")
-
-if not inspector.has_table("posts"):
-    Base.metadata.tables['posts'].create(engine)
-    log_database.info("Tabla 'posts' creada exitosamente.")
-
-if not inspector.has_table("news"):
-    Base.metadata.tables['news'].create(engine)
-    log_database.info("Tabla 'news' creada exitosamente.")
+# Inicializar la base de datos al cargar el módulo
+init_db()
 
 
 """ REPOSITORIOS """
@@ -91,7 +131,6 @@ def set_repo(new_repo: Repos):
         session.add(new_repo)
         session.commit()
         log_database.info(f"Repositorio {new_repo.name} guardado exitosamente.")
-
 
 def get_repos(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
@@ -108,7 +147,6 @@ def get_repos(order_by: str = "id", desc: bool = True):
             log_database.warning("No se encontraron repositorios.")
             return []
 
-
 def get_repo(by_id: int):
     with SessionLocal() as session:
         repo = session.query(Repos).filter(Repos.id == by_id).first()
@@ -119,7 +157,6 @@ def get_repo(by_id: int):
         else:
             log_database.warning(f"Repositorio con ID {by_id} no encontrado.")
             return None
-
 
 def update_repo(updated_repo):
     with SessionLocal() as session:
@@ -146,7 +183,6 @@ def update_repo(updated_repo):
         else:
             log_database.warning(f"Repositorio con ID {updated_repo.id} no encontrado para actualizar.")
 
-
 def delete_repo(repo_id: int):
     with SessionLocal() as session:
         repo = session.query(Repos).filter(Repos.id == repo_id).first()
@@ -166,7 +202,6 @@ def save_post(new_post: Posts):
         session.commit()
         log_database.info(f"Post {new_post.title} guardado exitosamente.")
 
-
 def get_post(repo_id):
     with SessionLocal() as session:
         post = session.query(Posts).filter(Posts.id == repo_id).first()
@@ -177,7 +212,6 @@ def get_post(repo_id):
         else:
             log_database.warning(f"Post con ID {repo_id} no encontrado.")
             return None
-
 
 def update_post(post):
     with SessionLocal() as session:
@@ -192,7 +226,6 @@ def update_post(post):
 
         else:
             log_database.warning(f"Post con ID {post.id} no encontrado para actualizar.")
-
 
 def get_posts(order_by: str = "id", desc: bool = True):
     with SessionLocal() as session:
@@ -215,8 +248,7 @@ def save_news(new_news: News):
     with SessionLocal() as session:
         session.add(new_news)
         session.commit()
-        log_database.info(f"Noticia {new_news.title} guardada exitosamente.")
-
+        log_database.info(f"Noticia [{new_news.title}] guardada exitosamente.")
 
 def get_news():
     with SessionLocal() as session:
@@ -228,3 +260,44 @@ def get_news():
         else:
             log_database.warning("No se encontraron noticias.")
             return []
+
+def get_news_by_url(url: str):
+    with SessionLocal() as session:
+        news = session.query(News).filter(News.url == url).first()
+        if news:
+            log_database.info(f"Noticia [{news.title}] recuperada exitosamente.")
+            return news
+
+        else:
+            log_database.warning(f"Noticia con URL [{url}] no encontrada.")
+            return None
+
+
+""" FUENTES DE NOTICIAS """
+def save_news_source(new_source: NewsSource):
+    with SessionLocal() as session:
+        session.add(new_source)
+        session.commit()
+        log_database.info(f"Fuente de noticias guardada exitosamente.")
+
+def get_news_sources():
+    with SessionLocal() as session:
+        sources = session.query(NewsSource).all()
+        if sources:
+            log_database.info(f"{len(sources)} fuentes de noticias recuperadas exitosamente.")
+            return sources
+
+        else:
+            log_database.warning("No se encontraron fuentes de noticias.")
+            return []
+
+def get_source_id_by_name(name: str):
+    with SessionLocal() as session:
+        source = session.query(NewsSource).filter(NewsSource.name == name).first()
+        if source:
+            log_database.info(f"ID de la fuente de noticias [{name}] recuperado exitosamente.")
+            return source.id
+
+        else:
+            log_database.warning(f"Fuente de noticias con URL [{name}] no encontrada.")
+            return None

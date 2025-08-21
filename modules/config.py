@@ -59,7 +59,8 @@ tags_metadata: List[Dict[str, Any]] = [
 
 CONFIG_FILE_PATH = Path(__file__).parent / ".." / "data" / "config.json"
 
-# Configuración centralizada de logging
+settings = load_config()
+
 LOGGING_CONFIG = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -90,22 +91,32 @@ LOGGING_CONFIG = {
             "level": "INFO",
             "propagate": False,
         },
-        "main": {                       # Logger principal de tu aplicación
+        "httpx": {                      # Logger para httpx
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
         },
-        "database": {                   # Logger para operaciones de base de datos
+        "config": {                     # Logger para el configurador
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
         },
-        "github": {                     # Logger para operaciones relacionadas con GitHub
+        "main": {                       # Logger para el main principal
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
         },
-        "techAI": {                     # Logger para elementos relacionados con techAI
+        "database": {                   # Logger de la base de datos
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "github": {                     # Logger de la API de GitHub
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "techAI": {                     # Logger de la herramienta del LLM
             "handlers": ["console"],
             "level": "INFO",
             "propagate": False,
@@ -117,13 +128,22 @@ LOGGING_CONFIG = {
     },
 }
 
-# Aplicar la configuración global de logging
+# Modifica LOGGING_CONFIG con los ajustes del usuario
+if settings.get('LOGGER'):
+    for key, value in settings['LOGGER'].items():
+        if key in LOGGING_CONFIG['loggers']:
+            LOGGING_CONFIG['loggers'][key]['level'] = value
+
 logging.config.dictConfig(LOGGING_CONFIG)
 
-# Crear loggers para los módulos específicos
-log_main = logging.getLogger("main")
-log_database = logging.getLogger("database")
-log_github = logging.getLogger("github")
-log_techAI = logging.getLogger("techAI")
+log_config = logging.getLogger("config")      # Logger del configurador
+log_main = logging.getLogger("main")          # Logger para el main principal
+log_database = logging.getLogger("database")  # Logger de la base de datos
+log_github = logging.getLogger("github")      # Logger de la API de GitHub
+log_techAI = logging.getLogger("techAI")      # Logger de la herramienta del LLM
 
-settings = load_config()
+if settings.get('LOGGER'):
+    log_config.info("Logging personalizado activado.")
+    for key, value in settings['LOGGER'].items():
+        if key in LOGGING_CONFIG['loggers']:
+            log_config.info(f"Nivel de '{key}' establecido a: {value}")

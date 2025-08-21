@@ -21,9 +21,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 
 
-# ------ Schedule Setup ------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ------ Schedule Setup ------
     scheduler = AsyncIOScheduler(timezone=timezone("Europe/Madrid"))
 
     scheduler.add_job(
@@ -125,6 +125,13 @@ async def generate_post_logic(data: dict, pipeline) -> database.Posts | None:
          description="Returns 'ok' if the service is running.")
 async def health():
     return "ok"
+
+
+@app.get("/test", tags=[Tags.state],
+            summary="Test endpoint",
+            description="Returns a test message to verify the service is running.")
+async def test():
+    await techAI.test_pipeline(mode=techAI.Pipeline.TEST)
 
 
 # ------ GITHUB USER ENDPOINTS ------
@@ -538,12 +545,12 @@ async def search_news():
 
         for item in news:
             save_news = database.News(
+                source_id=item["source_id"],
                 title=item["title"],
-                summary=item["summary"],
-                created_at=isoparse(item["date"]),
-                language=item["language"],
-                source=item["source"],
-                url=item["url"],
+                introduction=item["introduction"],
+                content=item["content"],
+                published_at=isoparse(item["date"]),
+                url=item["url"]
             )
 
             database.save_news(save_news)
@@ -559,5 +566,5 @@ if __name__ == "__main__":
     uvicorn.run("main:app",
                 host="0.0.0.0",
                 port=3000,
-                reload=True,
+                reload=False,
                 log_config=LOGGING_CONFIG)

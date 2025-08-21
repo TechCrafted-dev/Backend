@@ -45,3 +45,4 @@ Thumbs.db
 htmlcov/
 nosetests.xml
 coverage.xml
+test.py
