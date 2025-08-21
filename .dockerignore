@@ -36,3 +36,4 @@ entrypoint.sh
 .pytest_cache/
 .coverage
 htmlcov/
+test.py
