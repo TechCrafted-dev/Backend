@@ -31,6 +31,12 @@ CAPABILITIES = {
     "research": {"model": "o4-mini-deep-research", "max_output_tokens": False, "tool_choice": False, "search": True, "reasoner": False},
 }
 
+New_CAPABILITIES = {
+    "chat": {"search": False, "reasoner": False},
+    "reasoner": {"search": False, "reasoner": True},
+    "search": {"search": True, "reasoner": False},
+    "research": {"search": True, "reasoner": True},
+}
 
 # ---------- UTILS ----------
 def _extract_json(text: str) -> dict | Any:
@@ -87,6 +93,39 @@ def build_kwargs(*, config: str, system: str, user: str):
         kwargs["reasoning"] = {
             "effort": "medium"
         }
+
+    return kwargs
+
+
+def new_build_kwargs(*, config: str, system: str, user: str):
+    caps = New_CAPABILITIES[config]
+    kwargs = {
+        "model": "gpt-5",
+        "input": [
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {"role": "user", "content": [{"type": "input_text", "text": user}]},
+        ],
+        "text": {"format": {"type": "text"}, "verbosity": "medium"},
+        "reasoning": {"effort": "minimal"},
+        "tools": [],
+        "tool_choice": "auto"
+    }
+
+    # BUSCADOR
+    if caps.get("search"):
+        kwargs["reasoning"] = {"effort": "low"}
+        kwargs["tools"] = [{
+            "type": "web_search_preview",
+            "user_location": {
+                "type": "approximate"
+            },
+            "search_context_size": "medium"
+        }]
+
+    # RAZONADOR
+    if caps.get("reasoner"):
+        kwargs["reasoning"] = {"effort": "medium"}
+
 
     return kwargs
 
