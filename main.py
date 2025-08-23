@@ -513,22 +513,30 @@ async def get_news():
     try:
         news = database.get_news()
         if news:
-            return [
-                {
-                    "title": item.title,
-                    "summary": item.summary,
-                    "created_at": item.created_at,
-                    "language": item.language,
-                    "source": item.source,
-                    "url": item.url
-                } for item in news
-            ]
+            return news
 
         else:
             return {"error": "No news found"}
 
     except Exception as e:
         log_main.error(f"Error fetching news: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/sources_news", tags=[Tags.news], summary="Get all sources news",
+         description="Returns a list of all sources news articles stored in the database.")
+async def get_sources_news():
+    log_main.info("Obteniendo todas las fuentes de noticias")
+    try:
+        sources = database.get_news_sources()
+        if sources:
+            return sources
+
+        else:
+            return {"error": "No sources found"}
+
+    except Exception as e:
+        log_main.error(f"Error fetching sources: {e}")
         return {"error": str(e)}
 
 
