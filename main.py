@@ -127,13 +127,6 @@ async def health():
     return "ok"
 
 
-@app.get("/test", tags=[Tags.state],
-            summary="Test endpoint",
-            description="Returns a test message to verify the service is running.")
-async def test():
-    await techAI.test_pipeline(mode=techAI.Pipeline.TEST)
-
-
 # ------ GITHUB USER ENDPOINTS ------
 @app.get("/github-user", tags=[Tags.github], summary="Get GitHub user data",
          description="Fetches and returns the GitHub user data.")
@@ -318,7 +311,7 @@ async def delete_repo(repo_id: int):
 # ------ POSTS ENDPOINTS ------
 @app.get("/posts", tags=[Tags.post], summary="Get all posts",
          description="Returns a list of all posts stored in the database.")
-async def get_repos(
+async def get_posts(
     order_by: Optional[OrderField] = Query(
         default=None,
         description="Campo por el que ordenar"
