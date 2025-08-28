@@ -1,3 +1,4 @@
+import json
 import re
 import uvicorn
 import requests
@@ -245,7 +246,7 @@ async def get_repo(repo_id: int):
         return {"error": str(e)}
 
 
-@app.post("/repos", tags=[Tags.repos], summary="Update all database repositories ",
+@app.put("/repos", tags=[Tags.repos], summary="Update all database repositories ",
           description="Gets GitHub repositories and updates the database.")
 async def update_repos():
     new_data = github.get_repos_data()
@@ -531,6 +532,30 @@ async def get_sources_news():
     except Exception as e:
         log_main.error(f"Error fetching sources: {e}")
         return {"error": str(e)}
+
+
+@app.post("/sources_news", tags=[Tags.news], summary="Add sources news",
+          description="Add sources news in to database")
+async def add_sources_news(
+        sources = Query(
+            default=None,
+            description="sources in JSON format"
+        ),
+):
+    try:
+        log_main.info("Agregando fuentes de noticias...")
+
+        sources = json.loads(sources)
+        response = await techAI.get_sources(mode=techAI.Pipeline.SRCS, sources=sources)
+        return {f"message": response}
+
+    except json.JSONDecodeError as e:
+        return {"error": "Invalid JSON format"}
+
+    except Exception as e:
+        log_main.error(f"Error agregando fuentes: {e}")
+        return {"error": str(e)}
+
 
 
 @app.post("/search_news", tags=[Tags.news], summary="Get latest news",

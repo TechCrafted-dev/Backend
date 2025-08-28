@@ -40,6 +40,9 @@ New_CAPABILITIES = {
 
 # ---------- UTILS ----------
 def _extract_json(text: str) -> dict | Any:
+    if not text:
+        return {}
+
     match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
 
     try:
@@ -310,7 +313,10 @@ async def tool_markdown_polish(draft_md: str) -> str:
 
 
 # - Obtiene enlaces de fuentes de noticias [_response][find]
-async def tool_source_news():
+async def tool_source_news(sources: list = None) -> list:
+    if sources is not None:
+        return [sources]
+
     sources = database.get_news_sources()
     log_techAI.info("Obteniendo enlaces de fuentes de noticias...")
 
@@ -432,10 +438,13 @@ async def tool_source_rss(sources: list) -> dict:
 
 
 # - Valida las fuentes RSS
-async def tool_validate_rss(sources: dict):
+async def tool_validate_rss(sources: dict) -> str:
     log_techAI.info("Validando RSS...")
 
+    count = 0
     for source, data in sources.items():
+        count += 1
+
         try:
             resp = requests.get(data['rss'], timeout=10)
 
@@ -463,11 +472,11 @@ async def tool_validate_rss(sources: dict):
                 log_techAI.info("Error al guardar la fuente: %s", e)
                 raise e
 
-    return database.get_news_sources()
+    return f"Procesadas {count} fuentes válidas."
 
 
 # - Extrae las últimas noticias de la semana [_response][search]
-async def tool_extract_news():
+async def tool_extract_news() -> list:
     sources = database.get_news_sources()
     log_techAI.info(f"Extrayendo noticias de {len(sources)} fuentes...")
 
@@ -539,7 +548,7 @@ async def tool_extract_news():
 
 
 # - Genera las publicaciones de las noticias [_response][research]
-async def tool_gen_news(news_week):
+async def tool_gen_news(news_week) -> list:
     log_techAI.info(f"Generando publicaciones de {len(news_week)} noticias.")
 
     model = {
@@ -635,7 +644,7 @@ class Pipeline(Enum):
     NEWS = auto()     # Para obtener noticias
 
 
-async def _run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
+async def _run_pipeline(data: dict | list, mode: Pipeline) -> str | list | None:
     log_techAI.info("Ejecutando el pipeline en modo: %s", mode.name)
 
     match mode:
@@ -664,7 +673,7 @@ async def _run_pipeline(data: dict, mode: Pipeline) -> str | list | None:
 
         # Buscar y actualizar fuentes de noticias
         case Pipeline.SRCS:
-            find_sources = await tool_source_news()
+            find_sources = await tool_source_news(data)
             get_rss = await tool_source_rss(find_sources)
             sources = await tool_validate_rss(get_rss)
             return sources
@@ -707,6 +716,19 @@ async def gen_post(data, mode: Pipeline) -> str:
 
     except Exception as e:
         log_techAI.error("Error generando el post: %s", e)
+        raise
+
+
+# ---------- GET SOURCES ----------
+async def get_sources(mode: Pipeline, sources: dict = None) -> str:
+    log_techAI.info("Obteniendo fuentes de noticias...")
+    
+    try:
+        response = await _run_pipeline(data=sources, mode=mode)
+        return response
+    
+    except Exception as e:
+        log_techAI.error("Error obteniendo fuentes: %s", e)
         raise
 
 
