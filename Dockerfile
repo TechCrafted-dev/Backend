@@ -5,6 +5,10 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
+# --- Configuración de la Zona Horaria ---
+ENV TZ=Europe/Madrid
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
+
 # --- Argumentos de Build ---
 ARG VCS_REF
 LABEL org.opencontainers.image.revision=$VCS_REF \
