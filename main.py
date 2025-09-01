@@ -249,7 +249,10 @@ async def get_repo(repo_id: int):
 @app.put("/repos", tags=[Tags.repos], summary="Update all database repositories ",
           description="Gets GitHub repositories and updates the database.")
 async def update_repos():
-    new_data = github.get_repos_data()
+    repos_user = github.get_repos_data()
+    repos_orgs = github.get_orgs_data()
+
+    new_data = repos_user + repos_orgs[0]["repos"]
     old_data = database.get_repos()
 
     for data in new_data:

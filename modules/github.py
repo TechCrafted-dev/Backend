@@ -125,6 +125,9 @@ def get_orgs_data(order_by="created_at", reverse=True):
     orgs_data = []
 
     for org in orgs:
+        if not org["login"] in GITHUB_ORGS:
+            continue
+
         org_info = {
             "id": org["id"],
             "name": org["login"],
@@ -143,7 +146,7 @@ def get_orgs_data(order_by="created_at", reverse=True):
 
             repo_info = {
                 "id": repo["id"],
-                "name": repo_name,
+                "name": f"{repo_name} - {org['login']}",
                 "description": repo["description"] if repo["description"] else "No description available",
                 "url": repo["html_url"],
                 "language": repo["language"] if repo["language"] else "Unknown",
